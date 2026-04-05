@@ -8,25 +8,17 @@ function buildUrl(path) {
 }
 
 export function resolveMediaUrl(path) {
-  if (!path || typeof path !== "string") return "";
+  if (!path) return "";
 
-  const trimmed = path.trim();
-
-  if (!trimmed) return "";
-
-  if (
-    trimmed.startsWith("http://") ||
-    trimmed.startsWith("https://") ||
-    trimmed.startsWith("data:")
-  ) {
-    return trimmed;
+  if (path.startsWith("http://") || path.startsWith("https://")) {
+    return path;
   }
 
-  if (trimmed.startsWith("/")) {
-    return `${API_BASE}${trimmed}`;
+  if (path.startsWith("/")) {
+    return `${API_BASE}${path}`;
   }
 
-  return `${API_BASE}/${trimmed}`;
+  return `${API_BASE}/${path}`;
 }
 
 async function parseJsonSafely(response) {
