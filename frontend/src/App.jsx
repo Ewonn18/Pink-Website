@@ -72,7 +72,7 @@ export default function App() {
 
   useEffect(() => {
     const audio = audioRef.current;
-    if (!audio || !currentTrack) return;
+    if (!audio || !currentTrack?.file) return;
 
     setAudioError("");
     setIsPlaying(false);
@@ -80,6 +80,9 @@ export default function App() {
     setDuration(0);
 
     audio.pause();
+    audio.removeAttribute("src");
+    audio.load();
+
     audio.src = currentTrack.file;
     audio.currentTime = 0;
     audio.volume = volume;
@@ -90,6 +93,11 @@ export default function App() {
   async function togglePlay() {
     const audio = audioRef.current;
     if (!audio) return;
+
+    if (!audio.src) {
+      setAudioError("Music file could not be loaded.");
+      return;
+    }
 
     if (isPlaying) {
       audio.pause();
@@ -206,6 +214,8 @@ export default function App() {
         }}
         onError={() => {
           setIsPlaying(false);
+          setDuration(0);
+          setCurrentTime(0);
           setAudioError("Music file could not be played.");
         }}
       />

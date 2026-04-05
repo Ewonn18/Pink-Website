@@ -4,15 +4,15 @@ function normalizeBaseUrl(value) {
 }
 
 function getApiBase() {
-  // 🔥 1. Priority: ENV (used in Vercel)
   const envBase = normalizeBaseUrl(import.meta.env.VITE_API_BASE_URL);
-  if (envBase) return envBase;
 
-  // 🔥 2. Browser fallback logic
+  if (envBase) {
+    return envBase;
+  }
+
   if (typeof window !== "undefined") {
     const { protocol, hostname, port } = window.location;
 
-    // Local development
     if (hostname === "localhost" || hostname === "127.0.0.1") {
       if (port === "5173") {
         return "http://localhost:5000";
@@ -20,21 +20,19 @@ function getApiBase() {
       return `${protocol}//${window.location.host}`;
     }
 
-    // 🚀 Production (Vercel frontend + Render backend)
-    // If no env set, assume same origin (only works if proxy or same domain)
     return "";
   }
 
   return "";
 }
 
-export const API_BASE = getApiBase();
+function getPublicAssetUrl(path) {
+  if (!path) return "";
+  if (path.startsWith("http://") || path.startsWith("https://")) return path;
+  return encodeURI(path);
+}
 
-/**
- * ✅ IMPORTANT FOR DEPLOYMENT:
- * On Vercel, set:
- * VITE_API_BASE_URL = https://your-backend.onrender.com
- */
+export const API_BASE = getApiBase();
 
 export const RELATIONSHIP_START_DATE = new Date(2026, 1, 13, 0, 0, 0);
 
@@ -76,7 +74,7 @@ export const pageMusic = {
   Home: {
     title: "Our Little Song",
     subtitle: "A melody that feels like my love for you",
-    file: "/home-song.mp3",
+    file: getPublicAssetUrl("/home-song.mp3"),
     line1:
       "You are my favorite hello, my safest place, and the softest part of my heart.",
     line2:
@@ -86,7 +84,7 @@ export const pageMusic = {
   "Our Story": {
     title: "Our Story Song",
     subtitle: "The sound of how we began",
-    file: "/our-story-song.mp3",
+    file: getPublicAssetUrl("/our-story-song.mp3"),
     line1:
       "Every chapter of us is something I will always keep close to my heart.",
     line2:
@@ -96,7 +94,7 @@ export const pageMusic = {
   Gallery: {
     title: "Gallery Song",
     subtitle: "Music for our memories",
-    file: "/gallery-song.mp3",
+    file: getPublicAssetUrl("/gallery-song.mp3"),
     line1:
       "Every memory with you is proof that love can be both beautiful and real.",
     line2:
@@ -106,7 +104,7 @@ export const pageMusic = {
   "For Her": {
     title: "Her Song",
     subtitle: "Something soft just for her",
-    file: "/for-her-song.mp3",
+    file: getPublicAssetUrl("/for-her-song.mp3"),
     line1: "You are one of the most beautiful gifts my heart has ever known.",
     line2:
       "The more I know you, the more grateful I become that I get to love you.",
@@ -115,7 +113,7 @@ export const pageMusic = {
   "For Me": {
     title: "My Song",
     subtitle: "Something calm just for me",
-    file: "/for-me-song.mp3",
+    file: getPublicAssetUrl("/for-me-song.mp3"),
     line1:
       "Loving you makes me want to become softer, better, and more faithful every day.",
     line2:
