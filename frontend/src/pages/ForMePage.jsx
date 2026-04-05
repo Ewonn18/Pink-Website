@@ -1,11 +1,7 @@
-import { useMemo, useState } from "react";
 import MusicList from "../components/MusicList";
 import SectionTitle from "../components/SectionTitle";
-import FavoriteMomentCard from "../components/FavoriteMomentCard";
-import FavoriteMomentPreviewModal from "../components/FavoriteMomentPreviewModal";
 import { aaronSongs } from "../data/siteContent";
 import useWindowWidth from "../hooks/useWindowWidth";
-import { buildUrl } from "../lib/api";
 import {
   glassPanelStyle,
   glassPanelSoftStyle,
@@ -40,126 +36,165 @@ const aestheticTags = [
   "loyal heart",
 ];
 
-const rawFavoriteMoments = [
+const favoriteMoments = [
   {
     title: "Our first meet",
     caption: "One of the first moments that made everything feel real.",
-    imageUrl:
-      "/uploads/1773747926744-78610136-9c45328e-9698-43ba-89f5-f1b76f8764e7.jpg",
+    note: "A memory that still feels soft every time I look back at it.",
   },
   {
     title: "Just being silly together",
     caption: "A memory that felt light, easy, and full of comfort.",
-    imageUrl:
-      "/uploads/1773750129025-574913024-cfcf1687-bace-43db-9e4c-a1896978bb4a.jfif",
+    note: "The kind of moment that proves love can be simple and safe.",
   },
   {
     title: "A little night with you",
     caption: "Some nights stay because the feeling was that soft.",
-    imageUrl:
-      "/uploads/1773750605328-523836133-bdd56e31-01c3-48d5-ba11-6126d549c8f5.jfif",
+    note: "Quiet nights with you always feel heavier in the heart in the best way.",
   },
   {
     title: "My favorite place is you",
     caption: "The kind of memory that feels peaceful every time I look back.",
-    imageUrl:
-      "/uploads/1773750814766-511008691-808796a5-2fdc-4cce-8287-0ab439b84620.jfif",
+    note: "No matter where we are, the best part is always being with you.",
   },
 ];
 
-function normalizeFavoriteMoment(item) {
-  return {
-    ...item,
-    imageUrl: item?.imageUrl ? buildUrl(item.imageUrl) : "",
-  };
+function FavoriteTextMomentCard({ item }) {
+  return (
+    <div style={momentCardStyle}>
+      <div style={momentBadgeStyle}>favorite memory</div>
+
+      <h5 style={momentTitleStyle}>{item.title}</h5>
+      <p style={momentCaptionStyle}>{item.caption}</p>
+
+      <div style={momentNoteWrapStyle}>
+        <p style={momentNoteStyle}>{item.note}</p>
+      </div>
+    </div>
+  );
 }
 
 export default function ForMePage({ musicCard }) {
-  const [selectedMoment, setSelectedMoment] = useState(null);
   const windowWidth = useWindowWidth();
   const isNarrow = windowWidth < 1100;
 
-  const favoriteMoments = useMemo(
-    () => rawFavoriteMoments.map(normalizeFavoriteMoment),
-    [],
-  );
-
   return (
-    <>
-      <section
+    <section
+      style={{
+        position: "relative",
+        zIndex: 10,
+        maxWidth: "1380px",
+        margin: "0 auto",
+        padding: "48px 16px",
+      }}
+    >
+      <SectionTitle
+        title="For Me"
+        subtitle="A page for Aaron — calm, loyal, steady, and full of quiet love."
+      />
+
+      <div
         style={{
-          position: "relative",
-          zIndex: 10,
-          maxWidth: "1380px",
-          margin: "0 auto",
-          padding: "48px 16px",
+          display: "grid",
+          gap: "24px",
+          gridTemplateColumns: isNarrow
+            ? "1fr"
+            : musicCard
+              ? "minmax(0, 1fr) 340px"
+              : "1fr",
+          alignItems: "start",
         }}
       >
-        <SectionTitle
-          title="For Me"
-          subtitle="A page for Aaron — calm, loyal, steady, and full of quiet love."
-        />
+        <div style={{ display: "grid", gap: "20px" }}>
+          <div style={heroCardStyle}>
+            <div style={eyebrowStyle}>a quiet kind of love</div>
 
-        <div
-          style={{
-            display: "grid",
-            gap: "24px",
-            gridTemplateColumns: isNarrow
-              ? "1fr"
-              : musicCard
-                ? "minmax(0, 1fr) 340px"
-                : "1fr",
-            alignItems: "start",
-          }}
-        >
-          <div style={{ display: "grid", gap: "20px" }}>
-            <div style={heroCardStyle}>
-              <div style={eyebrowStyle}>a quiet kind of love</div>
+            <h3
+              style={{
+                margin: "14px 0 0",
+                fontSize: isNarrow ? "32px" : "42px",
+                lineHeight: 1.02,
+                fontWeight: 900,
+                color: "#ffe8f1",
+              }}
+            >
+              Aaron John Aquino
+            </h3>
 
-              <h3
-                style={{
-                  margin: "14px 0 0",
-                  fontSize: isNarrow ? "32px" : "42px",
-                  lineHeight: 1.02,
-                  fontWeight: 900,
-                  color: "#ffe8f1",
-                }}
-              >
-                Aaron John Aquino
-              </h3>
-
-              <p
-                style={{
-                  marginTop: "16px",
-                  maxWidth: "760px",
-                  color: "#fff0f6",
-                  lineHeight: 1.85,
-                  fontSize: "16px",
-                }}
-              >
-                This page carries the softer parts of me — the steady kind of
-                love, the quiet loyalty, and the heart that keeps choosing one
-                person again and again. Not loud, not flashy, just real,
-                constant, and full of care.
-              </p>
-
-              <div
-                style={{
-                  marginTop: "20px",
-                  display: "flex",
-                  flexWrap: "wrap",
-                  gap: "10px",
-                }}
-              >
-                <span style={pillStyle}>Calm</span>
-                <span style={pillStyle}>Steady</span>
-                <span style={pillStyle}>Faithful</span>
-                <span style={pillStyle}>Sincere</span>
-              </div>
-            </div>
+            <p
+              style={{
+                marginTop: "16px",
+                maxWidth: "760px",
+                color: "#fff0f6",
+                lineHeight: 1.85,
+                fontSize: "16px",
+              }}
+            >
+              This page carries the softer parts of me — the steady kind of
+              love, the quiet loyalty, and the heart that keeps choosing one
+              person again and again. Not loud, not flashy, just real, constant,
+              and full of care.
+            </p>
 
             <div
               style={{
+                marginTop: "20px",
+                display: "flex",
+                flexWrap: "wrap",
+                gap: "10px",
+              }}
+            >
+              <span style={pillStyle}>Calm</span>
+              <span style={pillStyle}>Steady</span>
+              <span style={pillStyle}>Faithful</span>
+              <span style={pillStyle}>Sincere</span>
+            </div>
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gap: "14px",
+              gridTemplateColumns: isNarrow
+                ? "1fr"
+                : "repeat(2, minmax(0, 1fr))",
+            }}
+          >
+            {detailItems.map(([label, value]) => (
+              <div key={label} style={infoCardStyle}>
+                <p style={labelStyle}>{label}</p>
+                <p style={valueStyle}>{value}</p>
+              </div>
+            ))}
+          </div>
+
+          <div style={sectionCardStyle}>
+            <p style={quoteLabelStyle}>mood board</p>
+            <h4 style={sectionHeadingStyle}>My aesthetic</h4>
+
+            <div
+              style={{
+                marginTop: "14px",
+                display: "flex",
+                flexWrap: "wrap",
+                gap: "10px",
+              }}
+            >
+              {aestheticTags.map((tag) => (
+                <span key={tag} style={tagStyle}>
+                  {tag}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div style={sectionCardStyle}>
+            <p style={quoteLabelStyle}>favorite things</p>
+            <h4 style={sectionHeadingStyle}>Little things that feel like me</h4>
+
+            <div
+              style={{
+                marginTop: "16px",
                 display: "grid",
                 gap: "14px",
                 gridTemplateColumns: isNarrow
@@ -167,111 +202,56 @@ export default function ForMePage({ musicCard }) {
                   : "repeat(2, minmax(0, 1fr))",
               }}
             >
-              {detailItems.map(([label, value]) => (
-                <div key={label} style={infoCardStyle}>
+              {favoriteThings.map(([label, value]) => (
+                <div key={label} style={favoriteCardStyle}>
                   <p style={labelStyle}>{label}</p>
                   <p style={valueStyle}>{value}</p>
                 </div>
               ))}
             </div>
-
-            <div style={sectionCardStyle}>
-              <p style={quoteLabelStyle}>mood board</p>
-              <h4 style={sectionHeadingStyle}>My aesthetic</h4>
-
-              <div
-                style={{
-                  marginTop: "14px",
-                  display: "flex",
-                  flexWrap: "wrap",
-                  gap: "10px",
-                }}
-              >
-                {aestheticTags.map((tag) => (
-                  <span key={tag} style={tagStyle}>
-                    {tag}
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            <div style={sectionCardStyle}>
-              <p style={quoteLabelStyle}>favorite things</p>
-              <h4 style={sectionHeadingStyle}>
-                Little things that feel like me
-              </h4>
-
-              <div
-                style={{
-                  marginTop: "16px",
-                  display: "grid",
-                  gap: "14px",
-                  gridTemplateColumns: isNarrow
-                    ? "1fr"
-                    : "repeat(2, minmax(0, 1fr))",
-                }}
-              >
-                {favoriteThings.map(([label, value]) => (
-                  <div key={label} style={favoriteCardStyle}>
-                    <p style={labelStyle}>{label}</p>
-                    <p style={valueStyle}>{value}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div style={sectionCardStyle}>
-              <p style={quoteLabelStyle}>favorite moments with you</p>
-              <h4 style={sectionHeadingStyle}>Little memories I keep close</h4>
-
-              <div
-                style={{
-                  marginTop: "16px",
-                  display: "grid",
-                  gap: "16px",
-                  gridTemplateColumns: isNarrow
-                    ? "1fr"
-                    : "repeat(2, minmax(0, 1fr))",
-                }}
-              >
-                {favoriteMoments.map((item) => (
-                  <FavoriteMomentCard
-                    key={item.title}
-                    item={item}
-                    onOpen={setSelectedMoment}
-                  />
-                ))}
-              </div>
-            </div>
-
-            <div style={loveNoteStyle}>
-              <p style={quoteLabelStyle}>little note</p>
-              <p style={loveNoteTextStyle}>
-                I may be quiet, but the love I carry is deep. The more I love
-                you, the more I understand that real love is not only in grand
-                gestures — it is also in staying, choosing, protecting, and
-                being gentle.
-              </p>
-            </div>
-
-            <MusicList title="My Favorite Music" songs={aaronSongs} />
           </div>
 
-          {musicCard ? (
-            <div
-              style={isNarrow ? undefined : { position: "sticky", top: "92px" }}
-            >
-              {musicCard}
-            </div>
-          ) : null}
-        </div>
-      </section>
+          <div style={sectionCardStyle}>
+            <p style={quoteLabelStyle}>favorite moments with you</p>
+            <h4 style={sectionHeadingStyle}>Little memories I keep close</h4>
 
-      <FavoriteMomentPreviewModal
-        item={selectedMoment}
-        onClose={() => setSelectedMoment(null)}
-      />
-    </>
+            <div
+              style={{
+                marginTop: "16px",
+                display: "grid",
+                gap: "16px",
+                gridTemplateColumns: isNarrow
+                  ? "1fr"
+                  : "repeat(2, minmax(0, 1fr))",
+              }}
+            >
+              {favoriteMoments.map((item) => (
+                <FavoriteTextMomentCard key={item.title} item={item} />
+              ))}
+            </div>
+          </div>
+
+          <div style={loveNoteStyle}>
+            <p style={quoteLabelStyle}>little note</p>
+            <p style={loveNoteTextStyle}>
+              I may be quiet, but the love I carry is deep. The more I love you,
+              the more I understand that real love is not only in grand gestures
+              — it is also in staying, choosing, protecting, and being gentle.
+            </p>
+          </div>
+
+          <MusicList title="My Favorite Music" songs={aaronSongs} />
+        </div>
+
+        {musicCard ? (
+          <div
+            style={isNarrow ? undefined : { position: "sticky", top: "92px" }}
+          >
+            {musicCard}
+          </div>
+        ) : null}
+      </div>
+    </section>
   );
 }
 
@@ -371,4 +351,57 @@ const tagStyle = {
   fontWeight: 700,
   fontSize: "13px",
   textTransform: "lowercase",
+};
+
+const momentCardStyle = {
+  borderRadius: "22px",
+  border: "1px solid rgba(255,255,255,0.10)",
+  background: "rgba(255,255,255,0.05)",
+  padding: "18px",
+  display: "grid",
+  gap: "12px",
+};
+
+const momentBadgeStyle = {
+  display: "inline-flex",
+  alignItems: "center",
+  width: "fit-content",
+  padding: "7px 10px",
+  borderRadius: "999px",
+  background: "rgba(255,255,255,0.06)",
+  border: "1px solid rgba(255,255,255,0.10)",
+  color: "#ffd8e7",
+  fontSize: "11px",
+  fontWeight: 800,
+  letterSpacing: "0.14em",
+  textTransform: "uppercase",
+};
+
+const momentTitleStyle = {
+  margin: 0,
+  color: "#ffe8f1",
+  fontSize: "22px",
+  fontWeight: 800,
+  lineHeight: 1.2,
+};
+
+const momentCaptionStyle = {
+  margin: 0,
+  color: "#fff0f6",
+  fontSize: "15px",
+  lineHeight: 1.75,
+};
+
+const momentNoteWrapStyle = {
+  borderRadius: "18px",
+  border: "1px solid rgba(255,255,255,0.08)",
+  background: "rgba(255,255,255,0.04)",
+  padding: "14px",
+};
+
+const momentNoteStyle = {
+  margin: 0,
+  color: "#ffdce9",
+  fontSize: "14px",
+  lineHeight: 1.7,
 };
