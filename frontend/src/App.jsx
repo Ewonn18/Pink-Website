@@ -14,9 +14,11 @@ function getInitialVolume() {
   try {
     const saved = localStorage.getItem("pink-player-volume");
     const parsed = saved ? Number(saved) : 0.8;
+
     if (!Number.isFinite(parsed)) return 0.8;
     if (parsed < 0) return 0;
     if (parsed > 1) return 1;
+
     return parsed;
   } catch {
     return 0.8;
@@ -51,12 +53,9 @@ export default function App() {
   const [volume, setVolume] = useState(getInitialVolume);
   const [isMuted, setIsMuted] = useState(getInitialMuted);
 
-  const [adminMode, setAdminMode] = useState(getInitialAdminMode);
+  const [showAdmin, setShowAdmin] = useState(getInitialAdminMode);
 
   const audioRef = useRef(null);
-  const secretTapCountRef = useRef(0);
-  const secretTapTimerRef = useRef(null);
-
   const currentTrack = pageMusic[currentPage];
 
   useEffect(() => {
@@ -85,11 +84,28 @@ export default function App() {
 
   useEffect(() => {
     try {
-      localStorage.setItem("pink-admin-mode", String(adminMode));
+      localStorage.setItem("pink-admin-mode", String(showAdmin));
     } catch {
       // ignore
     }
-  }, [adminMode]);
+  }, [showAdmin]);
+
+  useEffect(() => {
+    function handleAdminShortcut(event) {
+      const key = String(event.key || "").toLowerCase();
+
+      if (event.ctrlKey && event.shiftKey && key === "a") {
+        event.preventDefault();
+        setShowAdmin((prev) => !prev);
+      }
+    }
+
+    window.addEventListener("keydown", handleAdminShortcut);
+
+    return () => {
+      window.removeEventListener("keydown", handleAdminShortcut);
+    };
+  }, []);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -107,14 +123,6 @@ export default function App() {
     audio.muted = isMuted;
     audio.load();
   }, [currentTrack, volume, isMuted]);
-
-  useEffect(() => {
-    return () => {
-      if (secretTapTimerRef.current) {
-        clearTimeout(secretTapTimerRef.current);
-      }
-    };
-  }, []);
 
   async function togglePlay() {
     const audio = audioRef.current;
@@ -170,27 +178,6 @@ export default function App() {
     });
   }
 
-  function handleSecretBrandTap() {
-    secretTapCountRef.current += 1;
-
-    if (secretTapTimerRef.current) {
-      clearTimeout(secretTapTimerRef.current);
-    }
-
-    secretTapTimerRef.current = setTimeout(() => {
-      secretTapCountRef.current = 0;
-    }, 1400);
-
-    if (secretTapCountRef.current >= 5) {
-      setAdminMode((prev) => !prev);
-      secretTapCountRef.current = 0;
-
-      if (secretTapTimerRef.current) {
-        clearTimeout(secretTapTimerRef.current);
-      }
-    }
-  }
-
   const sharedMusicCard = (
     <PageMusicCard
       currentPage={currentPage}
@@ -213,11 +200,11 @@ export default function App() {
 
   if (currentPage === "Our Story") {
     pageContent = (
-      <StoryPage musicCard={sharedMusicCard} showAdmin={adminMode} />
+      <StoryPage musicCard={sharedMusicCard} showAdmin={showAdmin} />
     );
   } else if (currentPage === "Gallery") {
     pageContent = (
-      <GalleryPage musicCard={sharedMusicCard} showAdmin={adminMode} />
+      <GalleryPage musicCard={sharedMusicCard} showAdmin={showAdmin} />
     );
   } else if (currentPage === "For Her") {
     pageContent = <ForHerPage musicCard={sharedMusicCard} />;
@@ -264,11 +251,7 @@ export default function App() {
         }}
       />
 
-      <Navbar
-        currentPage={currentPage}
-        setCurrentPage={setCurrentPage}
-        onBrandSecretTap={handleSecretBrandTap}
-      />
+      <Navbar currentPage={currentPage} setCurrentPage={setCurrentPage} />
 
       <main key={currentPage} className="page-transition">
         {pageContent}
