@@ -7,6 +7,28 @@ function buildUrl(path) {
   return `${API_BASE}${path}`;
 }
 
+export function resolveMediaUrl(path) {
+  if (!path || typeof path !== "string") return "";
+
+  const trimmed = path.trim();
+
+  if (!trimmed) return "";
+
+  if (
+    trimmed.startsWith("http://") ||
+    trimmed.startsWith("https://") ||
+    trimmed.startsWith("data:")
+  ) {
+    return trimmed;
+  }
+
+  if (trimmed.startsWith("/")) {
+    return `${API_BASE}${trimmed}`;
+  }
+
+  return `${API_BASE}/${trimmed}`;
+}
+
 async function parseJsonSafely(response) {
   try {
     return await response.json();
@@ -20,18 +42,11 @@ export async function apiRequest(path, options = {}) {
 
   const finalHeaders = useAdmin ? getAdminHeaders(headers) : headers;
 
-  let response;
-
-  try {
-    response = await fetch(buildUrl(path), {
-      method,
-      headers: finalHeaders,
-      body,
-    });
-  } catch (error) {
-    // 🔥 Handles network failure (VERY IMPORTANT for deployment)
-    throw new Error("Network error. Please check your connection.");
-  }
+  const response = await fetch(buildUrl(path), {
+    method,
+    headers: finalHeaders,
+    body,
+  });
 
   const result = await parseJsonSafely(response);
 
@@ -47,7 +62,9 @@ export async function apiGet(path) {
 }
 
 export async function apiGetAdmin(path) {
-  return apiRequest(path, { useAdmin: true });
+  return apiRequest(path, {
+    useAdmin: true,
+  });
 }
 
 export async function apiPostJson(path, data, useAdmin = false) {
