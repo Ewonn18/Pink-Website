@@ -1,93 +1,601 @@
-import express from "express";
-import cors from "cors";
-import dotenv from "dotenv";
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
-import multer from "multer";
+require("dotenv").config();
 
-dotenv.config();
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const express = require("express");
+const cors = require("cors");
+const fs = require("fs");
+const path = require("path");
+const multer = require("multer");
+const { v2: cloudinary } = require("cloudinary");
 
 const app = express();
 
-function parseBoolean(value, fallback = false) {
-  if (typeof value !== "string") return fallback;
-  const normalized = value.trim().toLowerCase();
-  if (normalized === "true") return true;
-  if (normalized === "false") return false;
-  return fallback;
-}
-
-function parseAllowedOrigins(value) {
-  if (!value || typeof value !== "string") return [];
-  return value
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
 const PORT = Number(process.env.PORT) || 5000;
-const ADMIN_PASSCODE = process.env.ADMIN_PASSCODE || "";
-const TRUST_PROXY = parseBoolean(process.env.TRUST_PROXY, false);
-const allowedOrigins = parseAllowedOrigins(process.env.CORS_ORIGIN);
+const ADMIN_PASSCODE = String(process.env.ADMIN_PASSCODE || "").trim();
+const TRUST_PROXY =
+  String(process.env.TRUST_PROXY || "false").toLowerCase() === "true";
 
-app.set("trust proxy", TRUST_PROXY);
+if (TRUST_PROXY) {
+  app.set("trust proxy", true);
+}
 
-const corsOptions = {
-  origin(origin, callback) {
-    if (!origin) {
-      return callback(null, true);
-    }
+const ROOT_DIR = __dirname;
+const DATA_FILE = path.join(ROOT_DIR, "data.json");
 
-    if (allowedOrigins.length === 0) {
-      return callback(null, true);
-    }
+ensureDataFile();
 
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+  secure: true,
+});
 
-    return callback(new Error(`CORS blocked for origin: ${origin}`));
-  },
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "x-admin-passcode"],
-};
-
-app.use(cors(corsOptions));
-app.options("*", cors(corsOptions));
-
-app.use(express.json());
+app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-const uploadsDir = path.join(__dirname, "uploads");
-const dataFilePath = path.join(__dirname, "data.json");
+const allowedOriginsFromEnv = parseAllowedOrigins(process.env.CORS_ORIGIN);
 
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
+app.use(
+  cors({
+    origin(origin, callback) {
+      try {
+        if (isOriginAllowed(origin, allowedOriginsFromEnv)) {
+          return callback(null, true);
+        }
 
-if (!fs.existsSync(dataFilePath)) {
-  fs.writeFileSync(
-    dataFilePath,
-    JSON.stringify(
-      {
-        memories: [],
-        stories: [],
-      },
-      null,
-      2,
-    ),
-  );
-}
+        return callback(
+          new Error(`Origin not allowed by CORS: ${origin || "unknown"}`),
+        );
+      } catch (error) {
+        return callback(error);
+      }
+    },
+    credentials: false,
+  }),
+);
 
-app.use("/uploads", express.static(uploadsDir));
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 25 * 1024 * 1024,
+  },
+});
 
-function readData() {
+app.get("/api/health", (_req, res) => {
+  return res.json({
+    success: true,
+    status: "ok",
+    timestamp: new Date().toISOString(),
+  });
+});
+
+app.get("/api/dashboard/stats", (_req, res) => {
+  const db = readDatabase();
+  const memories = Array.isArray(db.memories) ? db.memories : [];
+  const stories = Array.isArray(db.stories) ? db.stories : [];
+
+  const photoCount = memories.filter(
+    (item) => normalizeMemoryType(item.type) === "photo",
+  ).length;
+  const videoCount = memories.filter(
+    (item) => normalizeMemoryType(item.type) === "video",
+  ).length;
+
+  return res.json({
+    success: true,
+    data: {
+      totalMemories: memories.length,
+      totalStories: stories.length,
+      photoCount,
+      videoCount,
+    },
+  });
+});
+
+app.get("/api/dashboard/latest", (_req, res) => {
+  const db = readDatabase();
+  const memories = Array.isArray(db.memories) ? db.memories : [];
+
+  const sorted = [...memories].sort((a, b) => {
+    return (
+      new Date(b.createdAt || 0).getTime() -
+      new Date(a.createdAt || 0).getTime()
+    );
+  });
+
+  return res.json({
+    success: true,
+    data: {
+      items: sorted.slice(0, 1),
+    },
+  });
+});
+
+app.get("/api/stories", (req, res) => {
+  const db = readDatabase();
+  const stories = Array.isArray(db.stories) ? db.stories : [];
+
+  const search = String(req.query.search || "")
+    .trim()
+    .toLowerCase();
+  const sort =
+    String(req.query.sort || "asc").toLowerCase() === "desc" ? "desc" : "asc";
+  const page = Math.max(Number(req.query.page) || 1, 1);
+  const limit = Math.max(Number(req.query.limit) || 5, 1);
+
+  let filtered = [...stories];
+
+  if (search) {
+    filtered = filtered.filter((item) => {
+      return [item.title, item.text, item.date]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(search);
+    });
+  }
+
+  filtered.sort((a, b) => {
+    const aTime = new Date(a.date || 0).getTime();
+    const bTime = new Date(b.date || 0).getTime();
+    return sort === "desc" ? bTime - aTime : aTime - bTime;
+  });
+
+  const paginated = paginate(filtered, page, limit);
+
+  return res.json({
+    success: true,
+    data: {
+      items: paginated.items,
+      pagination: paginated.pagination,
+    },
+  });
+});
+
+app.post("/api/stories", requireAdmin, (req, res) => {
+  const { date, title, text } = req.body || {};
+
+  if (!date || !title || !text) {
+    return res.status(400).json({
+      success: false,
+      message: "Date, title, and text are required.",
+    });
+  }
+
+  const db = readDatabase();
+
+  const story = {
+    id: Date.now(),
+    date: String(date).trim(),
+    title: String(title).trim(),
+    text: String(text).trim(),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  db.stories = Array.isArray(db.stories) ? db.stories : [];
+  db.stories.unshift(story);
+
+  writeDatabase(db);
+
+  return res.status(201).json({
+    success: true,
+    data: story,
+  });
+});
+
+app.put("/api/stories/:id", requireAdmin, (req, res) => {
+  const storyId = String(req.params.id);
+  const { date, title, text } = req.body || {};
+
+  if (!date || !title || !text) {
+    return res.status(400).json({
+      success: false,
+      message: "Date, title, and text are required.",
+    });
+  }
+
+  const db = readDatabase();
+  db.stories = Array.isArray(db.stories) ? db.stories : [];
+
+  const index = db.stories.findIndex((item) => String(item.id) === storyId);
+
+  if (index === -1) {
+    return res.status(404).json({
+      success: false,
+      message: "Story not found.",
+    });
+  }
+
+  const existing = db.stories[index];
+
+  const updated = {
+    ...existing,
+    date: String(date).trim(),
+    title: String(title).trim(),
+    text: String(text).trim(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  db.stories[index] = updated;
+  writeDatabase(db);
+
+  return res.json({
+    success: true,
+    data: updated,
+  });
+});
+
+app.delete("/api/stories/:id", requireAdmin, (req, res) => {
+  const storyId = String(req.params.id);
+
+  const db = readDatabase();
+  db.stories = Array.isArray(db.stories) ? db.stories : [];
+
+  const beforeCount = db.stories.length;
+  db.stories = db.stories.filter((item) => String(item.id) !== storyId);
+
+  if (db.stories.length === beforeCount) {
+    return res.status(404).json({
+      success: false,
+      message: "Story not found.",
+    });
+  }
+
+  writeDatabase(db);
+
+  return res.json({
+    success: true,
+    message: "Story deleted successfully.",
+  });
+});
+
+app.get("/api/memories", (req, res) => {
+  const db = readDatabase();
+  const memories = Array.isArray(db.memories) ? db.memories : [];
+
+  const search = String(req.query.search || "")
+    .trim()
+    .toLowerCase();
+  const sort =
+    String(req.query.sort || "desc").toLowerCase() === "asc" ? "asc" : "desc";
+  const type = String(req.query.type || "")
+    .trim()
+    .toLowerCase();
+  const page = Math.max(Number(req.query.page) || 1, 1);
+  const limit = Math.max(Number(req.query.limit) || 12, 1);
+
+  let filtered = [...memories];
+
+  if (type && type !== "all") {
+    filtered = filtered.filter(
+      (item) => normalizeMemoryType(item.type) === type,
+    );
+  }
+
+  if (search) {
+    filtered = filtered.filter((item) => {
+      return [item.title, item.description, item.type]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(search);
+    });
+  }
+
+  filtered.sort((a, b) => {
+    const aTime = new Date(a.createdAt || 0).getTime();
+    const bTime = new Date(b.createdAt || 0).getTime();
+    return sort === "asc" ? aTime - bTime : bTime - aTime;
+  });
+
+  const paginated = paginate(filtered, page, limit);
+
+  return res.json({
+    success: true,
+    data: {
+      items: paginated.items,
+      pagination: paginated.pagination,
+    },
+  });
+});
+
+app.post(
+  "/api/memories",
+  requireAdmin,
+  upload.any(),
+  async (req, res, next) => {
+    try {
+      const { title, description, type } = req.body || {};
+      const normalizedType = normalizeMemoryType(type);
+
+      if (!title || !description || !normalizedType) {
+        return res.status(400).json({
+          success: false,
+          message: "Title, description, and type are required.",
+        });
+      }
+
+      if (
+        normalizedType !== "photo" &&
+        normalizedType !== "video" &&
+        normalizedType !== "note"
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Type must be photo, video, or note.",
+        });
+      }
+
+      const uploadedFile = pickUploadedFile(req.files);
+
+      if (normalizedType !== "note" && !uploadedFile) {
+        return res.status(400).json({
+          success: false,
+          message: "A photo or video file is required for this memory type.",
+        });
+      }
+
+      let cloudinaryUpload = null;
+
+      if (uploadedFile) {
+        cloudinaryUpload = await uploadBufferToCloudinary(
+          uploadedFile.buffer,
+          normalizedType,
+          uploadedFile.originalname,
+        );
+      }
+
+      const db = readDatabase();
+      db.memories = Array.isArray(db.memories) ? db.memories : [];
+
+      const memory = {
+        id: Date.now(),
+        title: String(title).trim(),
+        description: String(description).trim(),
+        type: normalizedType,
+        fileUrl: cloudinaryUpload?.secure_url || "",
+        cloudinaryPublicId: cloudinaryUpload?.public_id || "",
+        cloudinaryResourceType: cloudinaryUpload?.resource_type || "",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        isPinned: false,
+      };
+
+      db.memories.unshift(memory);
+      writeDatabase(db);
+
+      return res.status(201).json({
+        success: true,
+        data: memory,
+      });
+    } catch (error) {
+      return next(error);
+    }
+  },
+);
+
+app.put(
+  "/api/memories/:id",
+  requireAdmin,
+  upload.any(),
+  async (req, res, next) => {
+    try {
+      const memoryId = String(req.params.id);
+      const { title, description, type, isPinned } = req.body || {};
+      const normalizedType = normalizeMemoryType(type);
+
+      const db = readDatabase();
+      db.memories = Array.isArray(db.memories) ? db.memories : [];
+
+      const index = db.memories.findIndex(
+        (item) => String(item.id) === memoryId,
+      );
+
+      if (index === -1) {
+        return res.status(404).json({
+          success: false,
+          message: "Memory not found.",
+        });
+      }
+
+      if (!title || !description || !normalizedType) {
+        return res.status(400).json({
+          success: false,
+          message: "Title, description, and type are required.",
+        });
+      }
+
+      const existing = db.memories[index];
+      const uploadedFile = pickUploadedFile(req.files);
+
+      let nextFileUrl = existing.fileUrl || "";
+      let nextPublicId = existing.cloudinaryPublicId || "";
+      let nextResourceType = existing.cloudinaryResourceType || "";
+
+      if (uploadedFile) {
+        const cloudinaryUpload = await uploadBufferToCloudinary(
+          uploadedFile.buffer,
+          normalizedType,
+          uploadedFile.originalname,
+        );
+
+        if (existing.cloudinaryPublicId) {
+          await deleteFromCloudinary(
+            existing.cloudinaryPublicId,
+            existing.cloudinaryResourceType || "image",
+          );
+        }
+
+        nextFileUrl = cloudinaryUpload.secure_url || "";
+        nextPublicId = cloudinaryUpload.public_id || "";
+        nextResourceType = cloudinaryUpload.resource_type || "";
+      }
+
+      if (normalizedType === "note") {
+        if (existing.cloudinaryPublicId) {
+          await deleteFromCloudinary(
+            existing.cloudinaryPublicId,
+            existing.cloudinaryResourceType || "image",
+          );
+        }
+
+        nextFileUrl = "";
+        nextPublicId = "";
+        nextResourceType = "";
+      }
+
+      const updated = {
+        ...existing,
+        title: String(title).trim(),
+        description: String(description).trim(),
+        type: normalizedType,
+        fileUrl: nextFileUrl,
+        cloudinaryPublicId: nextPublicId,
+        cloudinaryResourceType: nextResourceType,
+        isPinned:
+          typeof isPinned === "boolean"
+            ? isPinned
+            : String(isPinned).toLowerCase() === "true",
+        updatedAt: new Date().toISOString(),
+      };
+
+      db.memories[index] = updated;
+      writeDatabase(db);
+
+      return res.json({
+        success: true,
+        data: updated,
+      });
+    } catch (error) {
+      return next(error);
+    }
+  },
+);
+
+app.delete("/api/memories/:id", requireAdmin, async (req, res, next) => {
   try {
-    const raw = fs.readFileSync(dataFilePath, "utf8");
+    const memoryId = String(req.params.id);
+
+    const db = readDatabase();
+    db.memories = Array.isArray(db.memories) ? db.memories : [];
+
+    const existing = db.memories.find((item) => String(item.id) === memoryId);
+
+    if (!existing) {
+      return res.status(404).json({
+        success: false,
+        message: "Memory not found.",
+      });
+    }
+
+    db.memories = db.memories.filter((item) => String(item.id) !== memoryId);
+    writeDatabase(db);
+
+    if (existing.cloudinaryPublicId) {
+      await deleteFromCloudinary(
+        existing.cloudinaryPublicId,
+        existing.cloudinaryResourceType || "image",
+      );
+    }
+
+    return res.json({
+      success: true,
+      message: "Memory deleted successfully.",
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.use((error, _req, res, _next) => {
+  console.error("Unhandled server error:", error);
+
+  if (error instanceof multer.MulterError) {
+    if (error.code === "LIMIT_FILE_SIZE") {
+      return res.status(400).json({
+        success: false,
+        message: "File is too large. Maximum upload size is 25MB.",
+      });
+    }
+
+    return res.status(400).json({
+      success: false,
+      message: error.message || "Upload failed.",
+    });
+  }
+
+  if (String(error.message || "").includes("CORS")) {
+    return res.status(403).json({
+      success: false,
+      message: error.message,
+    });
+  }
+
+  return res.status(500).json({
+    success: false,
+    message: error.message || "Internal server error.",
+  });
+});
+
+app.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
+});
+
+function requireAdmin(req, res, next) {
+  const incomingPasscode = String(req.headers["x-admin-passcode"] || "").trim();
+
+  if (!ADMIN_PASSCODE) {
+    return res.status(500).json({
+      success: false,
+      message: "ADMIN_PASSCODE is not configured on the server.",
+    });
+  }
+
+  if (!incomingPasscode || incomingPasscode !== ADMIN_PASSCODE) {
+    return res.status(401).json({
+      success: false,
+      message: "Invalid admin passcode.",
+    });
+  }
+
+  return next();
+}
+
+function ensureDataFile() {
+  if (!fs.existsSync(DATA_FILE)) {
+    const initialData = {
+      memories: [],
+      stories: [],
+    };
+
+    fs.writeFileSync(DATA_FILE, JSON.stringify(initialData, null, 2), "utf-8");
+    return;
+  }
+
+  try {
+    const current = JSON.parse(fs.readFileSync(DATA_FILE, "utf-8"));
+    const next = {
+      memories: Array.isArray(current.memories) ? current.memories : [],
+      stories: Array.isArray(current.stories) ? current.stories : [],
+    };
+
+    fs.writeFileSync(DATA_FILE, JSON.stringify(next, null, 2), "utf-8");
+  } catch {
+    const safeData = {
+      memories: [],
+      stories: [],
+    };
+
+    fs.writeFileSync(DATA_FILE, JSON.stringify(safeData, null, 2), "utf-8");
+  }
+}
+
+function readDatabase() {
+  ensureDataFile();
+
+  try {
+    const raw = fs.readFileSync(DATA_FILE, "utf-8");
     const parsed = JSON.parse(raw);
 
     return {
@@ -102,56 +610,28 @@ function readData() {
   }
 }
 
-function writeData(data) {
-  fs.writeFileSync(dataFilePath, JSON.stringify(data, null, 2));
+function writeDatabase(data) {
+  const safeData = {
+    memories: Array.isArray(data.memories) ? data.memories : [],
+    stories: Array.isArray(data.stories) ? data.stories : [],
+  };
+
+  fs.writeFileSync(DATA_FILE, JSON.stringify(safeData, null, 2), "utf-8");
 }
 
-function requireAdmin(req, res, next) {
-  const passcode = req.header("x-admin-passcode");
-
-  if (!ADMIN_PASSCODE) {
-    return res.status(500).json({
-      success: false,
-      message: "Admin passcode is not configured on the server.",
-    });
-  }
-
-  if (!passcode || passcode !== ADMIN_PASSCODE) {
-    return res.status(401).json({
-      success: false,
-      message: "Invalid admin passcode.",
-    });
-  }
-
-  next();
-}
-
-function sortStories(items, sort = "asc") {
-  return [...items].sort((a, b) => {
-    const first = new Date(a.date).getTime();
-    const second = new Date(b.date).getTime();
-
-    if (sort === "desc") {
-      return second - first;
-    }
-
-    return first - second;
-  });
-}
-
-function paginate(items, page = 1, limit = 5) {
-  const currentPage = Math.max(1, Number(page) || 1);
-  const currentLimit = Math.max(1, Number(limit) || 5);
+function paginate(items, page, limit) {
   const total = items.length;
-  const totalPages = Math.max(1, Math.ceil(total / currentLimit));
-  const startIndex = (currentPage - 1) * currentLimit;
-  const endIndex = startIndex + currentLimit;
+  const totalPages = Math.max(Math.ceil(total / limit), 1);
+  const currentPage = Math.min(page, totalPages);
+  const startIndex = (currentPage - 1) * limit;
+  const endIndex = startIndex + limit;
+  const paginatedItems = items.slice(startIndex, endIndex);
 
   return {
-    items: items.slice(startIndex, endIndex),
+    items: paginatedItems,
     pagination: {
       page: currentPage,
-      limit: currentLimit,
+      limit,
       total,
       totalPages,
       hasMore: currentPage < totalPages,
@@ -159,146 +639,118 @@ function paginate(items, page = 1, limit = 5) {
   };
 }
 
-const storage = multer.diskStorage({
-  destination(req, file, cb) {
-    cb(null, uploadsDir);
-  },
-  filename(req, file, cb) {
-    const safeName = file.originalname.replace(/\s+/g, "-");
-    cb(null, `${Date.now()}-${safeName}`);
-  },
-});
-
-const upload = multer({ storage });
-
-app.get("/api/health", (req, res) => {
-  res.json({
-    success: true,
-    status: "ok",
-    timestamp: new Date().toISOString(),
-  });
-});
-
-app.get("/api/stories", (req, res) => {
-  const data = readData();
-  const page = Number(req.query.page) || 1;
-  const limit = Number(req.query.limit) || 5;
-  const sort = req.query.sort === "desc" ? "desc" : "asc";
-  const search = String(req.query.search || "")
+function normalizeMemoryType(value) {
+  const next = String(value || "")
     .trim()
     .toLowerCase();
 
-  let stories = sortStories(data.stories, sort);
+  if (next === "image") return "photo";
+  if (next === "text") return "note";
 
-  if (search) {
-    stories = stories.filter((item) => {
-      const title = String(item.title || "").toLowerCase();
-      const text = String(item.text || "").toLowerCase();
-      const date = String(item.date || "").toLowerCase();
+  return next;
+}
 
-      return (
-        title.includes(search) || text.includes(search) || date.includes(search)
-      );
-    });
+function pickUploadedFile(files) {
+  if (!Array.isArray(files) || files.length === 0) {
+    return null;
   }
 
-  const result = paginate(stories, page, limit);
+  const preferredFieldNames = ["file", "media", "image", "photo", "video"];
 
-  res.json({
-    success: true,
-    data: result,
+  for (const fieldName of preferredFieldNames) {
+    const matched = files.find((item) => item.fieldname === fieldName);
+    if (matched) return matched;
+  }
+
+  return files[0] || null;
+}
+
+function parseAllowedOrigins(value) {
+  return String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function isOriginAllowed(origin, envOrigins) {
+  if (!origin) return true;
+
+  if (envOrigins.includes(origin)) return true;
+
+  if (
+    origin === "http://localhost:5173" ||
+    origin === "http://127.0.0.1:5173" ||
+    origin === "http://localhost:4173" ||
+    origin === "http://127.0.0.1:4173"
+  ) {
+    return true;
+  }
+
+  try {
+    const hostname = new URL(origin).hostname;
+
+    if (hostname.endsWith(".vercel.app")) return true;
+    if (hostname.endsWith(".onrender.com")) return true;
+  } catch {
+    return false;
+  }
+
+  return false;
+}
+
+async function uploadBufferToCloudinary(buffer, memoryType, originalName) {
+  if (
+    !process.env.CLOUDINARY_CLOUD_NAME ||
+    !process.env.CLOUDINARY_API_KEY ||
+    !process.env.CLOUDINARY_API_SECRET
+  ) {
+    throw new Error("Cloudinary environment variables are missing.");
+  }
+
+  const resourceType = memoryType === "video" ? "video" : "image";
+  const folder =
+    memoryType === "video" ? "pink-website/videos" : "pink-website/photos";
+  const publicIdBase = sanitizePublicId(originalName || `memory-${Date.now()}`);
+
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        folder,
+        resource_type: resourceType,
+        public_id: `${Date.now()}-${publicIdBase}`,
+      },
+      (error, result) => {
+        if (error) {
+          return reject(error);
+        }
+
+        return resolve(result);
+      },
+    );
+
+    stream.end(buffer);
   });
-});
+}
 
-app.post("/api/stories", requireAdmin, (req, res) => {
-  const { date, title, text } = req.body || {};
+async function deleteFromCloudinary(publicId, resourceType) {
+  if (!publicId) return;
 
-  if (!date || !title || !text) {
-    return res.status(400).json({
-      success: false,
-      message: "Date, title, and text are required.",
+  try {
+    await cloudinary.uploader.destroy(publicId, {
+      resource_type: resourceType || "image",
     });
+  } catch (error) {
+    console.error("Failed to delete asset from Cloudinary:", error);
   }
+}
 
-  const data = readData();
+function sanitizePublicId(filename) {
+  const extension = path.extname(String(filename || ""));
+  const baseName = path.basename(String(filename || "file"), extension);
 
-  const newStory = {
-    id: Date.now(),
-    date: String(date).trim(),
-    title: String(title).trim(),
-    text: String(text).trim(),
-  };
-
-  data.stories.push(newStory);
-  writeData(data);
-
-  return res.status(201).json({
-    success: true,
-    data: newStory,
-  });
-});
-
-app.put("/api/stories/:id", requireAdmin, (req, res) => {
-  const { id } = req.params;
-  const { date, title, text } = req.body || {};
-
-  if (!date || !title || !text) {
-    return res.status(400).json({
-      success: false,
-      message: "Date, title, and text are required.",
-    });
-  }
-
-  const data = readData();
-  const storyId = Number(id);
-  const index = data.stories.findIndex((item) => Number(item.id) === storyId);
-
-  if (index === -1) {
-    return res.status(404).json({
-      success: false,
-      message: "Story not found.",
-    });
-  }
-
-  data.stories[index] = {
-    ...data.stories[index],
-    date: String(date).trim(),
-    title: String(title).trim(),
-    text: String(text).trim(),
-  };
-
-  writeData(data);
-
-  return res.json({
-    success: true,
-    data: data.stories[index],
-  });
-});
-
-app.delete("/api/stories/:id", requireAdmin, (req, res) => {
-  const { id } = req.params;
-  const data = readData();
-  const storyId = Number(id);
-
-  const nextStories = data.stories.filter(
-    (item) => Number(item.id) !== storyId,
-  );
-
-  if (nextStories.length === data.stories.length) {
-    return res.status(404).json({
-      success: false,
-      message: "Story not found.",
-    });
-  }
-
-  data.stories = nextStories;
-  writeData(data);
-
-  return res.json({
-    success: true,
-  });
-});
-
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-});
+  return baseName
+    .replace(/[^\w\-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .toLowerCase();
+}
