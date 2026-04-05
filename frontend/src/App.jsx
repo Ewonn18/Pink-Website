@@ -31,6 +31,14 @@ function getInitialMuted() {
   }
 }
 
+function getInitialAdminMode() {
+  try {
+    return localStorage.getItem("pink-admin-mode") === "true";
+  } catch {
+    return false;
+  }
+}
+
 export default function App() {
   const [currentPage, setCurrentPage] = useState("Home");
   const [isLoading, setIsLoading] = useState(true);
@@ -43,7 +51,12 @@ export default function App() {
   const [volume, setVolume] = useState(getInitialVolume);
   const [isMuted, setIsMuted] = useState(getInitialMuted);
 
+  const [adminMode, setAdminMode] = useState(getInitialAdminMode);
+
   const audioRef = useRef(null);
+  const secretTapCountRef = useRef(0);
+  const secretTapTimerRef = useRef(null);
+
   const currentTrack = pageMusic[currentPage];
 
   useEffect(() => {
@@ -71,8 +84,16 @@ export default function App() {
   }, [isMuted]);
 
   useEffect(() => {
+    try {
+      localStorage.setItem("pink-admin-mode", String(adminMode));
+    } catch {
+      // ignore
+    }
+  }, [adminMode]);
+
+  useEffect(() => {
     const audio = audioRef.current;
-    if (!audio || !currentTrack?.file) return;
+    if (!audio || !currentTrack) return;
 
     setAudioError("");
     setIsPlaying(false);
@@ -80,9 +101,6 @@ export default function App() {
     setDuration(0);
 
     audio.pause();
-    audio.removeAttribute("src");
-    audio.load();
-
     audio.src = currentTrack.file;
     audio.currentTime = 0;
     audio.volume = volume;
@@ -90,14 +108,17 @@ export default function App() {
     audio.load();
   }, [currentTrack, volume, isMuted]);
 
+  useEffect(() => {
+    return () => {
+      if (secretTapTimerRef.current) {
+        clearTimeout(secretTapTimerRef.current);
+      }
+    };
+  }, []);
+
   async function togglePlay() {
     const audio = audioRef.current;
     if (!audio) return;
-
-    if (!audio.src) {
-      setAudioError("Music file could not be loaded.");
-      return;
-    }
 
     if (isPlaying) {
       audio.pause();
@@ -149,6 +170,27 @@ export default function App() {
     });
   }
 
+  function handleSecretBrandTap() {
+    secretTapCountRef.current += 1;
+
+    if (secretTapTimerRef.current) {
+      clearTimeout(secretTapTimerRef.current);
+    }
+
+    secretTapTimerRef.current = setTimeout(() => {
+      secretTapCountRef.current = 0;
+    }, 1400);
+
+    if (secretTapCountRef.current >= 5) {
+      setAdminMode((prev) => !prev);
+      secretTapCountRef.current = 0;
+
+      if (secretTapTimerRef.current) {
+        clearTimeout(secretTapTimerRef.current);
+      }
+    }
+  }
+
   const sharedMusicCard = (
     <PageMusicCard
       currentPage={currentPage}
@@ -170,9 +212,13 @@ export default function App() {
   );
 
   if (currentPage === "Our Story") {
-    pageContent = <StoryPage musicCard={sharedMusicCard} />;
+    pageContent = (
+      <StoryPage musicCard={sharedMusicCard} showAdmin={adminMode} />
+    );
   } else if (currentPage === "Gallery") {
-    pageContent = <GalleryPage musicCard={sharedMusicCard} />;
+    pageContent = (
+      <GalleryPage musicCard={sharedMusicCard} showAdmin={adminMode} />
+    );
   } else if (currentPage === "For Her") {
     pageContent = <ForHerPage musicCard={sharedMusicCard} />;
   } else if (currentPage === "For Me") {
@@ -214,13 +260,15 @@ export default function App() {
         }}
         onError={() => {
           setIsPlaying(false);
-          setDuration(0);
-          setCurrentTime(0);
           setAudioError("Music file could not be played.");
         }}
       />
 
-      <Navbar currentPage={currentPage} setCurrentPage={setCurrentPage} />
+      <Navbar
+        currentPage={currentPage}
+        setCurrentPage={setCurrentPage}
+        onBrandSecretTap={handleSecretBrandTap}
+      />
 
       <main key={currentPage} className="page-transition">
         {pageContent}

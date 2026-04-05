@@ -174,7 +174,13 @@ function StoryForm({ onSuccess, editingStory, onCancelEdit, showToast }) {
   );
 }
 
-function StoryCard({ item, hasLineBelow, onEdit, onDelete }) {
+function StoryCard({
+  item,
+  hasLineBelow,
+  onEdit,
+  onDelete,
+  showAdmin = false,
+}) {
   return (
     <div
       style={{
@@ -243,14 +249,19 @@ function StoryCard({ item, hasLineBelow, onEdit, onDelete }) {
             </h3>
           </div>
 
-          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-            <button onClick={() => onEdit(item)} style={ghostButtonStyle}>
-              Edit
-            </button>
-            <button onClick={() => onDelete(item.id)} style={dangerButtonStyle}>
-              Delete
-            </button>
-          </div>
+          {showAdmin ? (
+            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+              <button onClick={() => onEdit(item)} style={ghostButtonStyle}>
+                Edit
+              </button>
+              <button
+                onClick={() => onDelete(item.id)}
+                style={dangerButtonStyle}
+              >
+                Delete
+              </button>
+            </div>
+          ) : null}
         </div>
 
         <p
@@ -301,7 +312,7 @@ function EmptyStoryState({ searchQuery }) {
   );
 }
 
-export default function StoryPage({ musicCard }) {
+export default function StoryPage({ musicCard, showAdmin = false }) {
   const [stories, setStories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editingStory, setEditingStory] = useState(null);
@@ -419,6 +430,12 @@ export default function StoryPage({ musicCard }) {
     fetchStories(1, true);
   }, [searchQuery, sortOrder]);
 
+  useEffect(() => {
+    if (!showAdmin) {
+      setEditingStory(null);
+    }
+  }, [showAdmin]);
+
   async function deleteStory(id) {
     try {
       const response = await fetch(`${API_BASE}/api/stories/${id}`, {
@@ -460,6 +477,7 @@ export default function StoryPage({ musicCard }) {
   }
 
   function handleEditStory(story) {
+    if (!showAdmin) return;
     setEditingStory(story);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -500,11 +518,18 @@ export default function StoryPage({ musicCard }) {
   };
 
   if (isDesktop) {
-    layoutStyle.gridTemplateColumns = musicCard
-      ? "320px minmax(0, 1fr) 340px"
-      : "320px minmax(0, 1fr)";
+    layoutStyle.gridTemplateColumns =
+      showAdmin && musicCard
+        ? "320px minmax(0, 1fr) 340px"
+        : showAdmin
+          ? "320px minmax(0, 1fr)"
+          : musicCard
+            ? "minmax(0, 1fr) 340px"
+            : "1fr";
   } else if (isTablet) {
-    layoutStyle.gridTemplateColumns = "300px minmax(0, 1fr)";
+    layoutStyle.gridTemplateColumns = showAdmin
+      ? "300px minmax(0, 1fr)"
+      : "1fr";
   } else {
     layoutStyle.gridTemplateColumns = "1fr";
   }
@@ -542,18 +567,22 @@ export default function StoryPage({ musicCard }) {
         />
 
         <div style={layoutStyle}>
-          <div
-            style={isDesktop ? { position: "sticky", top: "92px" } : undefined}
-          >
-            <AdminAccessPanel showToast={showToast} />
+          {showAdmin ? (
+            <div
+              style={
+                isDesktop ? { position: "sticky", top: "92px" } : undefined
+              }
+            >
+              <AdminAccessPanel showToast={showToast} />
 
-            <StoryForm
-              onSuccess={handleFormSuccess}
-              editingStory={editingStory}
-              onCancelEdit={() => setEditingStory(null)}
-              showToast={showToast}
-            />
-          </div>
+              <StoryForm
+                onSuccess={handleFormSuccess}
+                editingStory={editingStory}
+                onCancelEdit={() => setEditingStory(null)}
+                showToast={showToast}
+              />
+            </div>
+          ) : null}
 
           <div>
             <FilterToolbar
@@ -603,6 +632,7 @@ export default function StoryPage({ musicCard }) {
                       hasLineBelow={index !== stories.length - 1}
                       onEdit={handleEditStory}
                       onDelete={askDeleteStory}
+                      showAdmin={showAdmin}
                     />
                   ))}
                 </div>
