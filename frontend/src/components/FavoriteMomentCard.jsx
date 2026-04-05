@@ -1,7 +1,46 @@
 import { API_BASE } from "../data/siteContent";
 
+function normalizeUrl(value) {
+  if (!value || typeof value !== "string") return "";
+  return value.trim();
+}
+
+function buildMediaUrl(value) {
+  const raw = normalizeUrl(value);
+  if (!raw) return "";
+
+  if (raw.startsWith("http://") || raw.startsWith("https://")) {
+    return raw;
+  }
+
+  if (raw.startsWith("/")) {
+    return `${API_BASE}${raw}`;
+  }
+
+  return `${API_BASE}/${raw}`;
+}
+
+function getMomentImageUrl(item) {
+  if (!item || typeof item !== "object") return "";
+
+  const possibleUrl =
+    item.imageUrl ||
+    item.fileUrl ||
+    item.mediaUrl ||
+    item.cloudinaryUrl ||
+    item.url ||
+    item.secure_url ||
+    item.assetUrl ||
+    item.previewUrl ||
+    item?.asset?.url ||
+    item?.asset?.secure_url ||
+    "";
+
+  return buildMediaUrl(possibleUrl);
+}
+
 export default function FavoriteMomentCard({ item, onOpen }) {
-  const imageSrc = item.imageUrl ? `${API_BASE}${item.imageUrl}` : "";
+  const imageSrc = getMomentImageUrl(item);
 
   return (
     <button
@@ -12,10 +51,28 @@ export default function FavoriteMomentCard({ item, onOpen }) {
       <div style={momentCardStyle}>
         <div style={momentImageWrapStyle}>
           {imageSrc ? (
-            <img src={imageSrc} alt={item.title} style={momentImageStyle} />
-          ) : (
-            <div style={momentFallbackStyle}>♡</div>
-          )}
+            <img
+              src={imageSrc}
+              alt={item.title || "Favorite moment"}
+              style={momentImageStyle}
+              onError={(event) => {
+                event.currentTarget.style.display = "none";
+                const fallback = event.currentTarget.nextSibling;
+                if (fallback) {
+                  fallback.style.display = "flex";
+                }
+              }}
+            />
+          ) : null}
+
+          <div
+            style={{
+              ...momentFallbackStyle,
+              display: imageSrc ? "none" : "flex",
+            }}
+          >
+            ♡
+          </div>
         </div>
 
         <div style={{ marginTop: "14px" }}>
@@ -53,6 +110,7 @@ const momentImageWrapStyle = {
   overflow: "hidden",
   border: "1px solid rgba(255,255,255,0.08)",
   background: "rgba(255,255,255,0.04)",
+  position: "relative",
 };
 
 const momentImageStyle = {
@@ -65,11 +123,11 @@ const momentImageStyle = {
 const momentFallbackStyle = {
   width: "100%",
   aspectRatio: "4 / 3",
-  display: "flex",
   alignItems: "center",
   justifyContent: "center",
   color: "#ffd8e7",
   fontSize: "28px",
+  background: "rgba(255,255,255,0.03)",
 };
 
 const momentTitleStyle = {
