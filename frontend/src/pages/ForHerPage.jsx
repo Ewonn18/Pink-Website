@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import MusicList from "../components/MusicList";
 import SectionTitle from "../components/SectionTitle";
 import FavoriteMomentCard from "../components/FavoriteMomentCard";
 import FavoriteMomentPreviewModal from "../components/FavoriteMomentPreviewModal";
 import { aliyahnSongs } from "../data/siteContent";
 import useWindowWidth from "../hooks/useWindowWidth";
+import { buildUrl } from "../lib/api";
 import {
   glassPanelStyle,
   glassPanelSoftStyle,
@@ -42,7 +43,7 @@ const aestheticTags = [
   "sweet danger",
 ];
 
-const favoriteMoments = [
+const rawFavoriteMoments = [
   {
     title: "Our first meet",
     caption: "The kind of moment that made everything feel more real.",
@@ -69,10 +70,22 @@ const favoriteMoments = [
   },
 ];
 
+function normalizeFavoriteMoment(item) {
+  return {
+    ...item,
+    imageUrl: item?.imageUrl ? buildUrl(item.imageUrl) : "",
+  };
+}
+
 export default function ForHerPage({ musicCard }) {
   const [selectedMoment, setSelectedMoment] = useState(null);
   const windowWidth = useWindowWidth();
   const isNarrow = windowWidth < 1100;
+
+  const favoriteMoments = useMemo(
+    () => rawFavoriteMoments.map(normalizeFavoriteMoment),
+    [],
+  );
 
   return (
     <>

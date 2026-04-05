@@ -1,24 +1,38 @@
 import { API_BASE } from "../data/siteContent";
 import { getAdminHeaders } from "../utils/adminAuth";
 
-function buildUrl(path) {
-  if (!path) return API_BASE;
-  if (path.startsWith("http://") || path.startsWith("https://")) return path;
-  return `${API_BASE}${path}`;
+function normalizeSlashes(value) {
+  return String(value || "").replace(/([^:]\/)\/+/g, "$1");
 }
 
-export function resolveMediaUrl(path) {
-  if (!path) return "";
+export function buildUrl(path) {
+  if (!path) return API_BASE || "";
 
-  if (path.startsWith("http://") || path.startsWith("https://")) {
-    return path;
+  const value = String(path).trim();
+
+  if (!value) return API_BASE || "";
+
+  if (value.startsWith("http://") || value.startsWith("https://")) {
+    return value;
   }
 
-  if (path.startsWith("/")) {
-    return `${API_BASE}${path}`;
+  if (value.startsWith("//")) {
+    return `https:${value}`;
   }
 
-  return `${API_BASE}/${path}`;
+  if (!API_BASE) {
+    return value;
+  }
+
+  if (value.startsWith("/")) {
+    return normalizeSlashes(`${API_BASE}${value}`);
+  }
+
+  return normalizeSlashes(`${API_BASE}/${value}`);
+}
+
+export function resolveMediaUrl(value) {
+  return buildUrl(value);
 }
 
 async function parseJsonSafely(response) {
@@ -103,5 +117,3 @@ export async function apiPutForm(path, formData, useAdmin = false) {
     body: formData,
   });
 }
-
-export { buildUrl };

@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import MusicList from "../components/MusicList";
 import SectionTitle from "../components/SectionTitle";
 import FavoriteMomentCard from "../components/FavoriteMomentCard";
 import FavoriteMomentPreviewModal from "../components/FavoriteMomentPreviewModal";
 import { aaronSongs } from "../data/siteContent";
 import useWindowWidth from "../hooks/useWindowWidth";
+import { buildUrl } from "../lib/api";
 import {
   glassPanelStyle,
   glassPanelSoftStyle,
@@ -39,7 +40,7 @@ const aestheticTags = [
   "loyal heart",
 ];
 
-const favoriteMoments = [
+const rawFavoriteMoments = [
   {
     title: "Our first meet",
     caption: "One of the first moments that made everything feel real.",
@@ -66,10 +67,22 @@ const favoriteMoments = [
   },
 ];
 
+function normalizeFavoriteMoment(item) {
+  return {
+    ...item,
+    imageUrl: item?.imageUrl ? buildUrl(item.imageUrl) : "",
+  };
+}
+
 export default function ForMePage({ musicCard }) {
   const [selectedMoment, setSelectedMoment] = useState(null);
   const windowWidth = useWindowWidth();
   const isNarrow = windowWidth < 1100;
+
+  const favoriteMoments = useMemo(
+    () => rawFavoriteMoments.map(normalizeFavoriteMoment),
+    [],
+  );
 
   return (
     <>
@@ -84,7 +97,7 @@ export default function ForMePage({ musicCard }) {
       >
         <SectionTitle
           title="For Me"
-          subtitle="A page for Aaron calm, loyal, steady, and full of quiet love."
+          subtitle="A page for Aaron — calm, loyal, steady, and full of quiet love."
         />
 
         <div
