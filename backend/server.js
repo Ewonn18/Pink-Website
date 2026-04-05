@@ -1,28 +1,24 @@
-const express = require("express");
-const cors = require("cors");
-const fs = require("fs");
-const path = require("path");
-const multer = require("multer");
-const dotenv = require("dotenv");
+import express from "express";
+import cors from "cors";
+import dotenv from "dotenv";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+import multer from "multer";
 
 dotenv.config();
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const app = express();
 
-const PORT = Number(process.env.PORT) || 5000;
-const ADMIN_PASSCODE = String(process.env.ADMIN_PASSCODE || "").trim();
-const TRUST_PROXY =
-  String(process.env.TRUST_PROXY || "false").toLowerCase() === "true";
-
-const DATA_FILE = path.join(__dirname, "data.json");
-const UPLOADS_DIR = path.join(__dirname, "uploads");
-
-if (TRUST_PROXY) {
-  app.set("trust proxy", true);
-}
-
-if (!fs.existsSync(UPLOADS_DIR)) {
-  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+function parseBoolean(value, fallback = false) {
+  if (typeof value !== "string") return fallback;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "true") return true;
+  if (normalized === "false") return false;
+  return fallback;
 }
 
 function parseAllowedOrigins(value) {
@@ -33,7 +29,12 @@ function parseAllowedOrigins(value) {
     .filter(Boolean);
 }
 
+const PORT = Number(process.env.PORT) || 5000;
+const ADMIN_PASSCODE = process.env.ADMIN_PASSCODE || "";
+const TRUST_PROXY = parseBoolean(process.env.TRUST_PROXY, false);
 const allowedOrigins = parseAllowedOrigins(process.env.CORS_ORIGIN);
+
+app.set("trust proxy", TRUST_PROXY);
 
 const corsOptions = {
   origin(origin, callback) {
@@ -41,11 +42,15 @@ const corsOptions = {
       return callback(null, true);
     }
 
-    if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+    if (allowedOrigins.length === 0) {
       return callback(null, true);
     }
 
-    return callback(new Error(`Origin not allowed by CORS: ${origin}`));
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error(`CORS blocked for origin: ${origin}`));
   },
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "x-admin-passcode"],
@@ -54,49 +59,36 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.options("*", cors(corsOptions));
 
-app.use(express.json({ limit: "10mb" }));
+app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use("/uploads", express.static(UPLOADS_DIR));
 
-const storage = multer.diskStorage({
-  destination(req, file, cb) {
-    cb(null, UPLOADS_DIR);
-  },
-  filename(req, file, cb) {
-    const safeOriginal = String(file.originalname || "file")
-      .replace(/\s+/g, "-")
-      .replace(/[^a-zA-Z0-9._-]/g, "");
+const uploadsDir = path.join(__dirname, "uploads");
+const dataFilePath = path.join(__dirname, "data.json");
 
-    cb(
-      null,
-      `${Date.now()}-${Math.round(Math.random() * 1e9)}-${safeOriginal}`,
-    );
-  },
-});
-
-const upload = multer({
-  storage,
-  limits: {
-    fileSize: 30 * 1024 * 1024,
-  },
-});
-
-function ensureDataFile() {
-  if (!fs.existsSync(DATA_FILE)) {
-    fs.writeFileSync(
-      DATA_FILE,
-      JSON.stringify({ memories: [], stories: [] }, null, 2),
-      "utf8",
-    );
-  }
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-function readData() {
-  ensureDataFile();
+if (!fs.existsSync(dataFilePath)) {
+  fs.writeFileSync(
+    dataFilePath,
+    JSON.stringify(
+      {
+        memories: [],
+        stories: [],
+      },
+      null,
+      2,
+    ),
+  );
+}
 
+app.use("/uploads", express.static(uploadsDir));
+
+function readData() {
   try {
-    const raw = fs.readFileSync(DATA_FILE, "utf8");
-    const parsed = JSON.parse(raw || "{}");
+    const raw = fs.readFileSync(dataFilePath, "utf8");
+    const parsed = JSON.parse(raw);
 
     return {
       memories: Array.isArray(parsed.memories) ? parsed.memories : [],
@@ -110,100 +102,96 @@ function readData() {
   }
 }
 
-function writeData(nextData) {
-  fs.writeFileSync(DATA_FILE, JSON.stringify(nextData, null, 2), "utf8");
-}
-
-function success(res, data = {}, status = 200) {
-  return res.status(status).json({
-    success: true,
-    data,
-  });
-}
-
-function fail(res, message = "Request failed.", status = 400) {
-  return res.status(status).json({
-    success: false,
-    message,
-  });
+function writeData(data) {
+  fs.writeFileSync(dataFilePath, JSON.stringify(data, null, 2));
 }
 
 function requireAdmin(req, res, next) {
+  const passcode = req.header("x-admin-passcode");
+
   if (!ADMIN_PASSCODE) {
-    return fail(res, "Admin passcode is not configured on the server.", 500);
+    return res.status(500).json({
+      success: false,
+      message: "Admin passcode is not configured on the server.",
+    });
   }
 
-  const incoming = String(req.headers["x-admin-passcode"] || "").trim();
-
-  if (!incoming || incoming !== ADMIN_PASSCODE) {
-    return fail(res, "Invalid admin passcode.", 401);
+  if (!passcode || passcode !== ADMIN_PASSCODE) {
+    return res.status(401).json({
+      success: false,
+      message: "Invalid admin passcode.",
+    });
   }
 
   next();
 }
 
 function sortStories(items, sort = "asc") {
-  const copy = [...items];
-
-  copy.sort((a, b) => {
-    const aTime = new Date(a.date || 0).getTime();
-    const bTime = new Date(b.date || 0).getTime();
-
-    return sort === "desc" ? bTime - aTime : aTime - bTime;
-  });
-
-  return copy;
-}
-
-function sortMemoriesNewest(items) {
   return [...items].sort((a, b) => {
-    const aTime = new Date(a.createdAt || 0).getTime();
-    const bTime = new Date(b.createdAt || 0).getTime();
-    return bTime - aTime;
+    const first = new Date(a.date).getTime();
+    const second = new Date(b.date).getTime();
+
+    if (sort === "desc") {
+      return second - first;
+    }
+
+    return first - second;
   });
 }
 
-app.get("/", (req, res) => {
-  return res.json({
-    success: true,
-    message: "Pink backend is running.",
-  });
+function paginate(items, page = 1, limit = 5) {
+  const currentPage = Math.max(1, Number(page) || 1);
+  const currentLimit = Math.max(1, Number(limit) || 5);
+  const total = items.length;
+  const totalPages = Math.max(1, Math.ceil(total / currentLimit));
+  const startIndex = (currentPage - 1) * currentLimit;
+  const endIndex = startIndex + currentLimit;
+
+  return {
+    items: items.slice(startIndex, endIndex),
+    pagination: {
+      page: currentPage,
+      limit: currentLimit,
+      total,
+      totalPages,
+      hasMore: currentPage < totalPages,
+    },
+  };
+}
+
+const storage = multer.diskStorage({
+  destination(req, file, cb) {
+    cb(null, uploadsDir);
+  },
+  filename(req, file, cb) {
+    const safeName = file.originalname.replace(/\s+/g, "-");
+    cb(null, `${Date.now()}-${safeName}`);
+  },
 });
 
-app.get("/health", (req, res) => {
-  return res.json({
-    success: true,
-    status: "ok",
-    timestamp: new Date().toISOString(),
-  });
-});
+const upload = multer({ storage });
 
 app.get("/api/health", (req, res) => {
-  return res.json({
+  res.json({
     success: true,
     status: "ok",
     timestamp: new Date().toISOString(),
   });
 });
-
-/* -----------------------------
-   STORIES
------------------------------ */
 
 app.get("/api/stories", (req, res) => {
   const data = readData();
-
-  const page = Math.max(Number(req.query.page) || 1, 1);
-  const limit = Math.max(Number(req.query.limit) || 5, 1);
+  const page = Number(req.query.page) || 1;
+  const limit = Number(req.query.limit) || 5;
   const sort = req.query.sort === "desc" ? "desc" : "asc";
   const search = String(req.query.search || "")
     .trim()
     .toLowerCase();
 
-  let items = Array.isArray(data.stories) ? data.stories : [];
+  let stories = sortStories(data.stories, sort);
 
   if (search) {
-    items = items.filter((item) => {
+    stories = stories.filter((item) => {
       const title = String(item.title || "").toLowerCase();
       const text = String(item.text || "").toLowerCase();
       const date = String(item.date || "").toLowerCase();
@@ -214,22 +202,11 @@ app.get("/api/stories", (req, res) => {
     });
   }
 
-  items = sortStories(items, sort);
+  const result = paginate(stories, page, limit);
 
-  const total = items.length;
-  const totalPages = Math.max(Math.ceil(total / limit), 1);
-  const startIndex = (page - 1) * limit;
-  const pagedItems = items.slice(startIndex, startIndex + limit);
-
-  return success(res, {
-    items: pagedItems,
-    pagination: {
-      page,
-      limit,
-      total,
-      totalPages,
-      hasMore: page < totalPages,
-    },
+  res.json({
+    success: true,
+    data: result,
   });
 });
 
@@ -237,7 +214,10 @@ app.post("/api/stories", requireAdmin, (req, res) => {
   const { date, title, text } = req.body || {};
 
   if (!date || !title || !text) {
-    return fail(res, "Date, title, and text are required.", 400);
+    return res.status(400).json({
+      success: false,
+      message: "Date, title, and text are required.",
+    });
   }
 
   const data = readData();
@@ -247,13 +227,15 @@ app.post("/api/stories", requireAdmin, (req, res) => {
     date: String(date).trim(),
     title: String(title).trim(),
     text: String(text).trim(),
-    createdAt: new Date().toISOString(),
   };
 
-  data.stories.unshift(newStory);
+  data.stories.push(newStory);
   writeData(data);
 
-  return success(res, newStory, 201);
+  return res.status(201).json({
+    success: true,
+    data: newStory,
+  });
 });
 
 app.put("/api/stories/:id", requireAdmin, (req, res) => {
@@ -261,16 +243,21 @@ app.put("/api/stories/:id", requireAdmin, (req, res) => {
   const { date, title, text } = req.body || {};
 
   if (!date || !title || !text) {
-    return fail(res, "Date, title, and text are required.", 400);
+    return res.status(400).json({
+      success: false,
+      message: "Date, title, and text are required.",
+    });
   }
 
   const data = readData();
-  const index = data.stories.findIndex(
-    (item) => String(item.id) === String(id),
-  );
+  const storyId = Number(id);
+  const index = data.stories.findIndex((item) => Number(item.id) === storyId);
 
   if (index === -1) {
-    return fail(res, "Story not found.", 404);
+    return res.status(404).json({
+      success: false,
+      message: "Story not found.",
+    });
   }
 
   data.stories[index] = {
@@ -278,233 +265,40 @@ app.put("/api/stories/:id", requireAdmin, (req, res) => {
     date: String(date).trim(),
     title: String(title).trim(),
     text: String(text).trim(),
-    updatedAt: new Date().toISOString(),
   };
 
   writeData(data);
 
-  return success(res, data.stories[index]);
+  return res.json({
+    success: true,
+    data: data.stories[index],
+  });
 });
 
 app.delete("/api/stories/:id", requireAdmin, (req, res) => {
   const { id } = req.params;
-
   const data = readData();
-  const index = data.stories.findIndex(
-    (item) => String(item.id) === String(id),
+  const storyId = Number(id);
+
+  const nextStories = data.stories.filter(
+    (item) => Number(item.id) !== storyId,
   );
 
-  if (index === -1) {
-    return fail(res, "Story not found.", 404);
-  }
-
-  const removed = data.stories[index];
-  data.stories.splice(index, 1);
-  writeData(data);
-
-  return success(res, removed);
-});
-
-/* -----------------------------
-   MEMORIES
------------------------------ */
-
-app.get("/api/memories", (req, res) => {
-  const data = readData();
-
-  const page = Math.max(Number(req.query.page) || 1, 1);
-  const limit = Math.max(Number(req.query.limit) || 12, 1);
-  const search = String(req.query.search || "")
-    .trim()
-    .toLowerCase();
-  const type = String(req.query.type || "")
-    .trim()
-    .toLowerCase();
-
-  let items = sortMemoriesNewest(data.memories);
-
-  if (type) {
-    items = items.filter(
-      (item) => String(item.type || "").toLowerCase() === type,
-    );
-  }
-
-  if (search) {
-    items = items.filter((item) => {
-      const title = String(item.title || "").toLowerCase();
-      const description = String(item.description || "").toLowerCase();
-      return title.includes(search) || description.includes(search);
+  if (nextStories.length === data.stories.length) {
+    return res.status(404).json({
+      success: false,
+      message: "Story not found.",
     });
   }
 
-  const total = items.length;
-  const totalPages = Math.max(Math.ceil(total / limit), 1);
-  const startIndex = (page - 1) * limit;
-  const pagedItems = items.slice(startIndex, startIndex + limit);
-
-  return success(res, {
-    items: pagedItems,
-    pagination: {
-      page,
-      limit,
-      total,
-      totalPages,
-      hasMore: page < totalPages,
-    },
-  });
-});
-
-app.post("/api/memories", requireAdmin, upload.single("file"), (req, res) => {
-  const data = readData();
-
-  const title = String(req.body.title || "").trim();
-  const description = String(req.body.description || "").trim();
-  const type = String(req.body.type || "")
-    .trim()
-    .toLowerCase();
-
-  if (!title || !type) {
-    return fail(res, "Title and type are required.", 400);
-  }
-
-  let fileUrl = String(req.body.fileUrl || "").trim();
-
-  if (req.file) {
-    fileUrl = `/uploads/${req.file.filename}`;
-  }
-
-  const newMemory = {
-    id: Date.now(),
-    title,
-    description,
-    type,
-    fileUrl,
-    createdAt: new Date().toISOString(),
-    isPinned: false,
-  };
-
-  data.memories.unshift(newMemory);
+  data.stories = nextStories;
   writeData(data);
 
-  return success(res, newMemory, 201);
-});
-
-app.put(
-  "/api/memories/:id",
-  requireAdmin,
-  upload.single("file"),
-  (req, res) => {
-    const { id } = req.params;
-    const data = readData();
-
-    const index = data.memories.findIndex(
-      (item) => String(item.id) === String(id),
-    );
-
-    if (index === -1) {
-      return fail(res, "Memory not found.", 404);
-    }
-
-    const current = data.memories[index];
-
-    let fileUrl = current.fileUrl || "";
-
-    if (req.file) {
-      fileUrl = `/uploads/${req.file.filename}`;
-    } else if (req.body.fileUrl) {
-      fileUrl = String(req.body.fileUrl).trim();
-    }
-
-    data.memories[index] = {
-      ...current,
-      title: String(req.body.title || current.title || "").trim(),
-      description: String(
-        req.body.description || current.description || "",
-      ).trim(),
-      type: String(req.body.type || current.type || "")
-        .trim()
-        .toLowerCase(),
-      fileUrl,
-      isPinned:
-        typeof req.body.isPinned === "undefined"
-          ? current.isPinned
-          : String(req.body.isPinned) === "true" || req.body.isPinned === true,
-      updatedAt: new Date().toISOString(),
-    };
-
-    writeData(data);
-
-    return success(res, data.memories[index]);
-  },
-);
-
-app.delete("/api/memories/:id", requireAdmin, (req, res) => {
-  const { id } = req.params;
-  const data = readData();
-
-  const index = data.memories.findIndex(
-    (item) => String(item.id) === String(id),
-  );
-
-  if (index === -1) {
-    return fail(res, "Memory not found.", 404);
-  }
-
-  const removed = data.memories[index];
-  data.memories.splice(index, 1);
-  writeData(data);
-
-  return success(res, removed);
-});
-
-/* -----------------------------
-   DASHBOARD
------------------------------ */
-
-app.get("/api/stats", (req, res) => {
-  const data = readData();
-  const memories = Array.isArray(data.memories) ? data.memories : [];
-  const stories = Array.isArray(data.stories) ? data.stories : [];
-
-  const photoCount = memories.filter((item) => item.type === "photo").length;
-  const videoCount = memories.filter((item) => item.type === "video").length;
-
-  return success(res, {
-    totalMemories: memories.length,
-    totalStories: stories.length,
-    photoCount,
-    videoCount,
+  return res.json({
+    success: true,
   });
 });
 
-app.get("/api/latest-memory", (req, res) => {
-  const data = readData();
-  const items = sortMemoriesNewest(data.memories);
-  const latest = items[0] || null;
-
-  return success(res, {
-    items: latest ? [latest] : [],
-  });
-});
-
-/* -----------------------------
-   ERROR HANDLING
------------------------------ */
-
-app.use((error, req, res, next) => {
-  console.error("Unhandled server error:", error);
-
-  if (error instanceof multer.MulterError) {
-    return fail(res, error.message || "Upload failed.", 400);
-  }
-
-  if (error && error.message && error.message.includes("CORS")) {
-    return fail(res, error.message, 403);
-  }
-
-  return fail(res, "Internal server error.", 500);
-});
-
-app.listen(PORT, "0.0.0.0", () => {
+app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });
