@@ -1,49 +1,20 @@
 import { API_BASE } from "../data/siteContent";
 import { ghostButtonStyle } from "../styles/ui";
 
-function normalizeUrl(value) {
-  if (!value || typeof value !== "string") return "";
-  return value.trim();
-}
+function resolveImageUrl(imageUrl) {
+  if (!imageUrl || typeof imageUrl !== "string") return "";
 
-function buildMediaUrl(value) {
-  const raw = normalizeUrl(value);
-  if (!raw) return "";
-
-  if (raw.startsWith("http://") || raw.startsWith("https://")) {
-    return raw;
+  if (imageUrl.startsWith("http://") || imageUrl.startsWith("https://")) {
+    return imageUrl;
   }
 
-  if (raw.startsWith("/")) {
-    return `${API_BASE}${raw}`;
-  }
-
-  return `${API_BASE}/${raw}`;
-}
-
-function getMomentImageUrl(item) {
-  if (!item || typeof item !== "object") return "";
-
-  const possibleUrl =
-    item.imageUrl ||
-    item.fileUrl ||
-    item.mediaUrl ||
-    item.cloudinaryUrl ||
-    item.url ||
-    item.secure_url ||
-    item.assetUrl ||
-    item.previewUrl ||
-    item?.asset?.url ||
-    item?.asset?.secure_url ||
-    "";
-
-  return buildMediaUrl(possibleUrl);
+  return `${API_BASE}${imageUrl}`;
 }
 
 export default function FavoriteMomentPreviewModal({ item, onClose }) {
   if (!item) return null;
 
-  const imageSrc = getMomentImageUrl(item);
+  const imageSrc = resolveImageUrl(item.imageUrl);
 
   return (
     <div
@@ -117,7 +88,7 @@ export default function FavoriteMomentPreviewModal({ item, onClose }) {
         {imageSrc ? (
           <img
             src={imageSrc}
-            alt={item.title || "Favorite moment"}
+            alt={item.title}
             style={{
               width: "100%",
               maxHeight: "72vh",
@@ -126,24 +97,10 @@ export default function FavoriteMomentPreviewModal({ item, onClose }) {
               display: "block",
               background: "rgba(0,0,0,0.20)",
             }}
-            onError={(event) => {
-              event.currentTarget.style.display = "none";
-              const fallback = event.currentTarget.nextSibling;
-              if (fallback) {
-                fallback.style.display = "flex";
-              }
-            }}
           />
-        ) : null}
-
-        <div
-          style={{
-            ...momentFallbackStyle,
-            display: imageSrc ? "none" : "flex",
-          }}
-        >
-          ♡
-        </div>
+        ) : (
+          <div style={momentFallbackStyle}>♡</div>
+        )}
       </div>
     </div>
   );
@@ -161,11 +118,9 @@ const quoteLabelStyle = {
 const momentFallbackStyle = {
   width: "100%",
   aspectRatio: "4 / 3",
+  display: "flex",
   alignItems: "center",
   justifyContent: "center",
   color: "#ffd8e7",
   fontSize: "28px",
-  borderRadius: "18px",
-  background: "rgba(255,255,255,0.04)",
-  border: "1px solid rgba(255,255,255,0.08)",
 };
