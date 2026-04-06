@@ -1,7 +1,36 @@
-export default function Navbar({ currentPage, setCurrentPage }) {
+import { useRef } from "react";
+
+export default function Navbar({
+  currentPage,
+  setCurrentPage,
+  onSecretAdminToggle,
+}) {
   const links = ["Home", "Our Story", "Gallery", "For Her", "For Me"];
   const isMobile =
     typeof window !== "undefined" ? window.innerWidth < 768 : false;
+
+  const tapCountRef = useRef(0);
+  const tapTimerRef = useRef(null);
+
+  function handleLogoTap() {
+    tapCountRef.current += 1;
+
+    if (tapTimerRef.current) {
+      clearTimeout(tapTimerRef.current);
+    }
+
+    if (tapCountRef.current >= 5) {
+      tapCountRef.current = 0;
+      if (onSecretAdminToggle) {
+        onSecretAdminToggle();
+      }
+      return;
+    }
+
+    tapTimerRef.current = setTimeout(() => {
+      tapCountRef.current = 0;
+    }, 2200);
+  }
 
   return (
     <nav
@@ -30,7 +59,10 @@ export default function Navbar({ currentPage, setCurrentPage }) {
         }}
       >
         <button
-          onClick={() => setCurrentPage("Home")}
+          onClick={() => {
+            handleLogoTap();
+            setCurrentPage("Home");
+          }}
           style={{
             border: "none",
             background: "transparent",

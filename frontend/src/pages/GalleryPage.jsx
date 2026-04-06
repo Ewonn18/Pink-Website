@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import SectionTitle from "../components/SectionTitle";
 import Toast from "../components/Toast";
 import ConfirmModal from "../components/ConfirmModal";
@@ -11,8 +11,8 @@ import useWindowWidth from "../hooks/useWindowWidth";
 import useFeedbackUI from "../hooks/useFeedbackUI";
 import { getAdminHeaders } from "../utils/adminAuth";
 import {
-  adminPanelCompactStyle,
-  adminPanelTitleWithTopMarginStyle,
+  adminPanelStyle,
+  adminPanelTitleStyle,
   adminPanelSubtitleStyle,
   adminTopBadgeStyle,
   adminFieldLabelStyle,
@@ -27,127 +27,82 @@ import {
 } from "../styles/adminForm";
 import {
   primaryButtonStyle,
+  secondaryButtonStyle,
   ghostButtonStyle,
   dangerButtonStyle,
 } from "../styles/buttons";
 
 const PAGE_LIMIT = 6;
 
-function normalizeUrl(value) {
-  if (!value || typeof value !== "string") return "";
-  return value.trim();
-}
+function resolveMediaUrl(fileUrl) {
+  if (!fileUrl || typeof fileUrl !== "string") return "";
 
-function buildMediaUrl(value) {
-  const raw = normalizeUrl(value);
-  if (!raw) return "";
-
-  if (raw.startsWith("http://") || raw.startsWith("https://")) {
-    return raw;
+  if (fileUrl.startsWith("http://") || fileUrl.startsWith("https://")) {
+    return fileUrl;
   }
 
-  if (raw.startsWith("/")) {
-    return `${API_BASE}${raw}`;
+  return `${API_BASE}${fileUrl}`;
+}
+
+function formatMemoryDate(value) {
+  try {
+    return new Date(value).toLocaleString("en-US", {
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  } catch {
+    return value;
+  }
+}
+
+function truncateFileName(name, maxLength = 32) {
+  if (!name) return "No file selected";
+  if (name.length <= maxLength) return name;
+
+  const dotIndex = name.lastIndexOf(".");
+  if (dotIndex === -1) {
+    return `${name.slice(0, maxLength - 3)}...`;
   }
 
-  return `${API_BASE}/${raw}`;
+  const extension = name.slice(dotIndex);
+  const base = name.slice(0, dotIndex);
+  const allowedBaseLength = Math.max(8, maxLength - extension.length - 3);
+
+  return `${base.slice(0, allowedBaseLength)}...${extension}`;
 }
 
-function getItemMediaUrl(item) {
-  if (!item || typeof item !== "object") return "";
-
-  const possibleUrl =
-    item.fileUrl ||
-    item.mediaUrl ||
-    item.cloudinaryUrl ||
-    item.url ||
-    item.secure_url ||
-    item.imageUrl ||
-    item.videoUrl ||
-    item.assetUrl ||
-    item.previewUrl ||
-    item?.asset?.url ||
-    item?.asset?.secure_url ||
-    "";
-
-  return buildMediaUrl(possibleUrl);
-}
-
-function isVideoItem(item) {
-  const explicitType = String(item?.type || "").toLowerCase();
-  if (explicitType === "video") return true;
-  if (explicitType === "photo") return false;
-
-  const url = getItemMediaUrl(item).toLowerCase();
-  return [".mp4", ".webm", ".ogg", ".mov", ".m4v"].some((ext) =>
-    url.includes(ext),
-  );
-}
-
-function EmptyGalleryState({ searchQuery }) {
-  const hasSearch = searchQuery.trim();
-
-  return (
-    <div style={adminPanelCompactStyle}>
-      <h3
-        style={{
-          margin: 0,
-          fontSize: "24px",
-          fontWeight: 800,
-          color: "#ffe8f1",
-        }}
-      >
-        {hasSearch ? "No memories matched" : "Your gallery is still empty"}
-      </h3>
-
-      <p
-        style={{
-          marginTop: "10px",
-          color: "#ffd8e7",
-          lineHeight: 1.7,
-          fontSize: "15px",
-        }}
-      >
-        {hasSearch
-          ? "Try a different search word."
-          : "Start with your first photo, video, or little love note and build this page into a timeline of your sweetest memories together."}
-      </p>
-    </div>
-  );
-}
-
-function GalleryForm({
-  onSuccess,
-  editingItem,
-  onCancelEdit,
-  showToast,
-  showAdmin,
-}) {
+function MemoryForm({ onSuccess, editingMemory, onCancelEdit, showToast }) {
   const [form, setForm] = useState({
     title: "",
     description: "",
     type: "photo",
-    file: null,
   });
-  const [submitting, setSubmitting] = useState(false);
+  const [file, setFile] = useState(null);
+  const [removeFile, setRemoveFile] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (editingItem) {
+    if (editingMemory) {
       setForm({
-        title: editingItem.title || "",
-        description: editingItem.description || "",
-        type: editingItem.type || "photo",
-        file: null,
+        title: editingMemory.title || "",
+        description: editingMemory.description || "",
+        type: editingMemory.type || "photo",
       });
+      setFile(null);
+      setRemoveFile(false);
     } else {
       setForm({
         title: "",
         description: "",
         type: "photo",
-        file: null,
       });
+      setFile(null);
+      setRemoveFile(false);
     }
-  }, [editingItem]);
+  }, [editingMemory]);
 
   function handleChange(event) {
     const { name, value } = event.target;
@@ -157,72 +112,80 @@ function GalleryForm({
     }));
   }
 
-  function handleFileChange(event) {
-    const file = event.target.files?.[0] || null;
-    setForm((prev) => ({
-      ...prev,
-      file,
-    }));
-  }
+  const hasExistingFile = Boolean(editingMemory?.fileUrl);
 
   async function handleSubmit(event) {
     event.preventDefault();
-
-    if (!showAdmin) {
-      showToast("Admin access is hidden on this deployment.", "error");
-      return;
-    }
+    setLoading(true);
 
     try {
-      setSubmitting(true);
+      const isEditing = Boolean(editingMemory);
 
-      const isEditing = Boolean(editingItem);
-      const endpoint = isEditing
-        ? `${API_BASE}/api/memories/${editingItem.id}`
-        : `${API_BASE}/api/memories`;
+      if (isEditing) {
+        const formData = new FormData();
+        formData.append("title", form.title);
+        formData.append("description", form.description);
+        formData.append("type", form.type);
+        formData.append("removeFile", String(removeFile));
 
-      const formData = new FormData();
-      formData.append("title", form.title);
-      formData.append("description", form.description);
-      formData.append("type", form.type);
+        if (file) {
+          formData.append("file", file);
+        }
 
-      if (form.file) {
-        formData.append("file", form.file);
-      }
-
-      const response = await fetch(endpoint, {
-        method: isEditing ? "PUT" : "POST",
-        headers: getAdminHeaders(),
-        body: formData,
-      });
-
-      let result = null;
-      try {
-        result = await response.json();
-      } catch {
-        result = null;
-      }
-
-      if (!response.ok || !result?.success) {
-        throw new Error(
-          result?.message ||
-            (isEditing
-              ? "Failed to update memory."
-              : "Failed to upload memory."),
+        const response = await fetch(
+          `${API_BASE}/api/memories/${editingMemory.id}`,
+          {
+            method: "PUT",
+            headers: getAdminHeaders(),
+            body: formData,
+          },
         );
+
+        let result = null;
+        try {
+          result = await response.json();
+        } catch {
+          result = null;
+        }
+
+        if (!response.ok || !result?.success) {
+          throw new Error(result?.message || "Failed to update memory.");
+        }
+      } else {
+        const formData = new FormData();
+        formData.append("title", form.title);
+        formData.append("description", form.description);
+        formData.append("type", form.type);
+
+        if (file) {
+          formData.append("file", file);
+        }
+
+        const response = await fetch(`${API_BASE}/api/memories`, {
+          method: "POST",
+          headers: getAdminHeaders(),
+          body: formData,
+        });
+
+        let result = null;
+        try {
+          result = await response.json();
+        } catch {
+          result = null;
+        }
+
+        if (!response.ok || !result?.success) {
+          throw new Error(result?.message || "Failed to upload memory.");
+        }
       }
 
-      setForm({
-        title: "",
-        description: "",
-        type: "photo",
-        file: null,
-      });
-
+      setForm({ title: "", description: "", type: "photo" });
+      setFile(null);
+      setRemoveFile(false);
       onSuccess();
 
       showToast(
-        isEditing
+        editingMemory
           ? "Memory updated successfully."
           : "Memory uploaded successfully.",
         "success",
@@ -230,29 +193,30 @@ function GalleryForm({
     } catch (error) {
       showToast(error.message || "Failed to save memory.", "error");
     } finally {
-      setSubmitting(false);
+      setLoading(false);
     }
   }
 
-  if (!showAdmin) return null;
+  const canShowFileInput = !editingMemory || form.type !== "story";
+  const canReplaceFile = editingMemory && form.type !== "story";
+  const canRemoveExistingFile = editingMemory && hasExistingFile;
 
   return (
-    <form onSubmit={handleSubmit} style={adminPanelCompactStyle}>
+    <form onSubmit={handleSubmit} style={adminPanelStyle}>
       <div style={adminTopBadgeStyle}>Memory Uploader</div>
 
-      <h3 style={adminPanelTitleWithTopMarginStyle}>
-        {editingItem ? "Edit Memory" : "Upload a Memory"}
+      <h3 style={adminPanelTitleStyle}>
+        {editingMemory ? "Edit Memory" : "Upload a Memory"}
       </h3>
 
       <p style={adminPanelSubtitleStyle}>
         Save photos, videos, or little love notes in one beautiful place.
       </p>
 
-      <div style={{ display: "grid", gap: "16px", marginTop: "20px" }}>
+      <div style={{ display: "grid", gap: "16px", marginTop: "22px" }}>
         <div>
           <label style={adminFieldLabelStyle}>Memory title</label>
           <input
-            type="text"
             name="title"
             value={form.title}
             onChange={handleChange}
@@ -271,7 +235,10 @@ function GalleryForm({
             placeholder="Write what made this moment special..."
             rows={5}
             required
-            style={adminTextareaStyle}
+            style={{
+              ...adminTextareaStyle,
+              minHeight: "138px",
+            }}
           />
         </div>
 
@@ -285,44 +252,72 @@ function GalleryForm({
           >
             <option value="photo">Photo</option>
             <option value="video">Video</option>
+            <option value="story">Story</option>
           </select>
         </div>
 
-        <div>
-          <label style={adminFieldLabelStyle}>Photo or video</label>
-
-          <div style={adminFilePickerRowStyle}>
-            <label style={adminFilePickerButtonStyle}>
-              Choose File
-              <input
-                type="file"
-                accept={form.type === "video" ? "video/*" : "image/*"}
-                onChange={handleFileChange}
-                style={{ display: "none" }}
-              />
+        {canShowFileInput ? (
+          <div>
+            <label style={adminFieldLabelStyle}>
+              {editingMemory ? "Replace file (optional)" : "Photo or video"}
             </label>
 
-            <div style={adminFileNameStyle}>
-              {form.file
-                ? form.file.name
-                : editingItem
-                  ? "Keep current uploaded file"
-                  : "No file selected"}
+            <div style={adminFilePickerRowStyle}>
+              <label style={adminFilePickerButtonStyle}>
+                <input
+                  type="file"
+                  accept="image/*,video/*"
+                  onChange={(event) => setFile(event.target.files?.[0] || null)}
+                  style={{ display: "none" }}
+                />
+                {editingMemory ? "Choose New File" : "Choose File"}
+              </label>
+
+              <div style={adminFileNameStyle}>
+                {truncateFileName(file?.name)}
+              </div>
             </div>
           </div>
+        ) : null}
 
-          <div style={adminMediaHintStyle}>
-            {form.type === "video"
-              ? "Upload an MP4, MOV, or WebM video."
-              : "Upload a JPG, PNG, WEBP, or similar image."}
+        {canReplaceFile && canRemoveExistingFile ? (
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "10px",
+              color: "#ffe7f1",
+              fontSize: "14px",
+              fontWeight: 600,
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={removeFile}
+              onChange={(event) => setRemoveFile(event.target.checked)}
+            />
+            Remove current attached media
+          </label>
+        ) : null}
+
+        {editingMemory && form.type === "story" ? (
+          <div
+            style={{
+              ...adminInputStyle,
+              color: "#ffd8e7",
+              lineHeight: 1.6,
+            }}
+          >
+            Story memories do not keep an uploaded file. If this memory had
+            media before, it will be removed when you save.
           </div>
-        </div>
+        ) : null}
 
         <AdminFormActions
-          isEditing={Boolean(editingItem)}
-          isLoading={submitting}
+          isEditing={Boolean(editingMemory)}
+          isLoading={loading}
           createText="Save Memory"
-          createLoadingText="Saving..."
+          createLoadingText="Uploading..."
           editText="Save Changes"
           editLoadingText="Saving..."
           onCancel={onCancelEdit}
@@ -334,76 +329,81 @@ function GalleryForm({
   );
 }
 
-function GalleryCard({ item, onOpen, onEdit, onDelete, showAdmin }) {
-  const mediaUrl = getItemMediaUrl(item);
-  const isVideo = isVideoItem(item);
-  const [mediaFailed, setMediaFailed] = useState(false);
+function MemoryCard({
+  memory,
+  onDelete,
+  onEdit,
+  onPreview,
+  isWide = false,
+  showAdmin = false,
+}) {
+  const fullFileUrl = resolveMediaUrl(memory.fileUrl);
 
   return (
     <div
+      className="media-card"
       style={{
-        ...adminPanelCompactStyle,
-        padding: "22px",
-        display: "grid",
-        gap: "16px",
+        ...adminPanelStyle,
+        padding: isWide ? "24px" : "22px",
+        overflow: "hidden",
+        height: "100%",
+        display: "flex",
+        flexDirection: "column",
       }}
     >
       <div
         style={{
           display: "flex",
-          gap: "12px",
           justifyContent: "space-between",
           alignItems: "flex-start",
+          gap: "14px",
           flexWrap: "wrap",
         }}
       >
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={adminTypeBadgeStyle}>{item.type || "photo"}</div>
+          <div style={adminTypeBadgeStyle}>{memory.type}</div>
 
           <h3
             style={{
               margin: "14px 0 0",
-              fontSize: "24px",
+              fontSize: isWide ? "30px" : "24px",
               fontWeight: 800,
-              color: "#ffe8f1",
               lineHeight: 1.15,
+              color: "#ffe8f1",
+              overflowWrap: "anywhere",
             }}
           >
-            {item.title}
+            {memory.title}
           </h3>
 
           <p
             style={{
               margin: "10px 0 0",
-              color: "#ffd8e7",
-              fontSize: "14px",
-              lineHeight: 1.7,
+              fontSize: "13px",
+              color: "#ffd3e4",
+              lineHeight: 1.6,
             }}
           >
-            {item.createdAt
-              ? new Date(item.createdAt).toLocaleString("en-US", {
-                  month: "long",
-                  day: "numeric",
-                  year: "numeric",
-                  hour: "numeric",
-                  minute: "2-digit",
-                })
-              : "Saved memory"}
+            {formatMemoryDate(memory.createdAt)}
           </p>
         </div>
 
         <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-          <button onClick={() => onOpen(item)} style={ghostButtonStyle}>
+          <button
+            onClick={() => onPreview(memory)}
+            style={secondaryButtonStyle}
+          >
             View
           </button>
 
           {showAdmin ? (
             <>
-              <button onClick={() => onEdit(item)} style={ghostButtonStyle}>
+              <button onClick={() => onEdit(memory)} style={ghostButtonStyle}>
                 Edit
               </button>
+
               <button
-                onClick={() => onDelete(item.id)}
+                onClick={() => onDelete(memory.id)}
                 style={dangerButtonStyle}
               >
                 Delete
@@ -413,82 +413,102 @@ function GalleryCard({ item, onOpen, onEdit, onDelete, showAdmin }) {
         </div>
       </div>
 
-      <div
-        style={{
-          overflow: "hidden",
-          borderRadius: "22px",
-          border: "1px solid rgba(255,255,255,0.08)",
-          background: "rgba(255,255,255,0.03)",
-        }}
-      >
-        {!mediaUrl || mediaFailed ? (
+      {memory.fileUrl && memory.type === "photo" ? (
+        <div
+          onClick={() => onPreview(memory)}
+          style={{
+            marginTop: "22px",
+            cursor: "pointer",
+          }}
+        >
           <div
             style={{
-              minHeight: "320px",
-              display: "grid",
-              placeItems: "center",
-              padding: "20px",
-              color: "#ffd8e7",
-              textAlign: "center",
-              lineHeight: 1.7,
+              overflow: "hidden",
+              borderRadius: "22px",
+              border: "1px solid rgba(255,255,255,0.08)",
+              boxShadow: "0 14px 30px rgba(0,0,0,0.18)",
             }}
           >
-            Media preview unavailable.
+            <img
+              src={fullFileUrl}
+              alt={memory.title}
+              loading="lazy"
+              style={{
+                width: "100%",
+                aspectRatio: isWide ? "16 / 10.5" : "4 / 3.8",
+                objectFit: "cover",
+                display: "block",
+              }}
+            />
           </div>
-        ) : isVideo ? (
-          <video
-            controls
-            preload="metadata"
+
+          <div style={adminMediaHintStyle}>Tap to view full photo</div>
+        </div>
+      ) : null}
+
+      {memory.fileUrl && memory.type === "video" ? (
+        <div
+          onClick={() => onPreview(memory)}
+          style={{
+            marginTop: "22px",
+            cursor: "pointer",
+          }}
+        >
+          <div
             style={{
-              width: "100%",
-              display: "block",
-              maxHeight: "520px",
-              objectFit: "cover",
-              background: "#1b0010",
+              overflow: "hidden",
+              borderRadius: "22px",
+              border: "1px solid rgba(255,255,255,0.08)",
+              boxShadow: "0 14px 30px rgba(0,0,0,0.18)",
+              background: "black",
             }}
-            onError={() => setMediaFailed(true)}
           >
-            <source src={mediaUrl} />
-          </video>
-        ) : (
-          <img
-            src={mediaUrl}
-            alt={item.title || "Memory"}
-            style={{
-              width: "100%",
-              display: "block",
-              maxHeight: "520px",
-              objectFit: "cover",
-              background: "#1b0010",
-            }}
-            onError={() => setMediaFailed(true)}
-          />
-        )}
-      </div>
+            <video
+              src={fullFileUrl}
+              preload="metadata"
+              style={{
+                width: "100%",
+                aspectRatio: isWide ? "16 / 10.5" : "4 / 3.8",
+                objectFit: "cover",
+                display: "block",
+              }}
+              muted
+            />
+          </div>
+
+          <div style={adminMediaHintStyle}>Tap to play full video</div>
+        </div>
+      ) : null}
+
+      {!memory.fileUrl && memory.type === "story" ? (
+        <div
+          style={{
+            marginTop: "22px",
+            border: "1px solid rgba(255,255,255,0.08)",
+            background: "rgba(255,255,255,0.04)",
+            borderRadius: "18px",
+            padding: "16px",
+            color: "#ffdce9",
+            fontSize: "13px",
+            lineHeight: 1.6,
+          }}
+        >
+          This is a written memory with no attached file.
+        </div>
+      ) : null}
 
       <div
         style={{
-          display: "inline-flex",
-          alignItems: "center",
-          width: "fit-content",
-          padding: "8px 12px",
-          borderRadius: "999px",
-          border: "1px solid rgba(255,255,255,0.10)",
-          background: "rgba(255,255,255,0.05)",
-          color: "#ffe7f1",
-          fontSize: "12px",
-          fontWeight: 700,
-        }}
-      >
-        {isVideo ? "Tap to play full video" : "Tap to view full photo"}
-      </div>
-
-      <div
-        style={{
-          borderRadius: "20px",
+          marginTop: "18px",
+          borderRadius: "18px",
           border: "1px solid rgba(255,255,255,0.08)",
-          background: "rgba(255,255,255,0.03)",
-          padding: "18px",
+          background: "rgba(255,255,255,0.05)",
+          padding: isWide ? "18px" : "16px",
+          flex: 1,
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "space-between",
+          gap: "10px",
         }}
       >
         <p
@@ -496,20 +516,23 @@ function GalleryCard({ item, onOpen, onEdit, onDelete, showAdmin }) {
             margin: 0,
             color: "#fff0f6",
             lineHeight: 1.85,
-            fontSize: "15px",
-            whiteSpace: "pre-wrap",
+            fontSize: isWide ? "16px" : "15px",
             overflowWrap: "anywhere",
+            display: "-webkit-box",
+            WebkitLineClamp: 4,
+            WebkitBoxOrient: "vertical",
+            overflow: "hidden",
           }}
         >
-          {item.description}
+          {memory.description}
         </p>
 
         <p
           style={{
-            margin: "12px 0 0",
+            margin: 0,
+            fontSize: "12px",
             color: "#ffd8e7",
-            fontSize: "13px",
-            fontWeight: 700,
+            fontWeight: 600,
           }}
         >
           Open the preview to see the full memory.
@@ -519,11 +542,71 @@ function GalleryCard({ item, onOpen, onEdit, onDelete, showAdmin }) {
   );
 }
 
-function PreviewModal({ item, onClose }) {
-  const mediaUrl = getItemMediaUrl(item);
-  const isVideo = isVideoItem(item);
+function EmptyGalleryState({ searchQuery, selectedType }) {
+  const hasFilters = searchQuery.trim() || selectedType !== "all";
 
+  return (
+    <div
+      style={{
+        ...adminPanelStyle,
+        minHeight: "260px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        textAlign: "center",
+        padding: "28px",
+      }}
+    >
+      <div style={{ maxWidth: "460px" }}>
+        <div
+          style={{
+            width: "64px",
+            height: "64px",
+            margin: "0 auto 18px",
+            borderRadius: "999px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "rgba(255,255,255,0.08)",
+            border: "1px solid rgba(255,255,255,0.10)",
+            fontSize: "28px",
+          }}
+        >
+          ♡
+        </div>
+
+        <h3
+          style={{
+            margin: 0,
+            fontSize: "24px",
+            fontWeight: 800,
+            color: "#ffe8f1",
+          }}
+        >
+          {hasFilters ? "No memories matched" : "Your gallery is still empty"}
+        </h3>
+
+        <p
+          style={{
+            marginTop: "10px",
+            fontSize: "15px",
+            lineHeight: 1.7,
+            color: "#ffd8e7",
+          }}
+        >
+          {hasFilters
+            ? "Try a different search word or change the selected memory type."
+            : "Start with your first photo, video, or little love note and build this page into a timeline of your sweetest memories together."}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function PreviewModal({ item, onClose }) {
   if (!item) return null;
+
+  const fullFileUrl = resolveMediaUrl(item.fileUrl);
 
   return (
     <div
@@ -531,27 +614,25 @@ function PreviewModal({ item, onClose }) {
       style={{
         position: "fixed",
         inset: 0,
-        zIndex: 999,
-        background: "rgba(10,0,6,0.78)",
-        backdropFilter: "blur(8px)",
-        padding: "24px",
-        display: "grid",
-        placeItems: "center",
+        zIndex: 1000,
+        background: "rgba(0,0,0,0.82)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "20px",
       }}
     >
       <div
-        className="moment-modal-card"
         onClick={(event) => event.stopPropagation()}
         style={{
           width: "min(1000px, 100%)",
           maxHeight: "90vh",
           overflow: "auto",
-          borderRadius: "28px",
+          borderRadius: "24px",
           border: "1px solid rgba(255,255,255,0.12)",
-          background:
-            "linear-gradient(180deg, rgba(48,0,24,0.80), rgba(20,0,12,0.86))",
-          boxShadow: "0 20px 60px rgba(0,0,0,0.42)",
-          padding: "22px",
+          background: "rgba(48,0,24,0.95)",
+          padding: "20px",
+          boxShadow: "0 18px 40px rgba(0,0,0,0.35)",
         }}
       >
         <div
@@ -560,22 +641,45 @@ function PreviewModal({ item, onClose }) {
             justifyContent: "space-between",
             gap: "12px",
             alignItems: "flex-start",
+            marginBottom: "16px",
             flexWrap: "wrap",
           }}
         >
           <div>
-            <div style={adminTypeBadgeStyle}>{item.type || "photo"}</div>
+            <p
+              style={{
+                margin: 0,
+                fontSize: "11px",
+                fontWeight: 800,
+                letterSpacing: "0.14em",
+                textTransform: "uppercase",
+                color: "#ffd2e4",
+              }}
+            >
+              {item.type}
+            </p>
+
             <h3
               style={{
-                margin: "12px 0 0",
-                fontSize: "30px",
-                lineHeight: 1.1,
-                fontWeight: 900,
+                margin: "8px 0 0",
                 color: "#ffe8f1",
+                fontSize: "26px",
+                lineHeight: 1.15,
               }}
             >
               {item.title}
             </h3>
+
+            <p
+              style={{
+                margin: "10px 0 0",
+                color: "#fff0f6",
+                lineHeight: 1.8,
+                fontSize: "15px",
+              }}
+            >
+              {item.description}
+            </p>
           </div>
 
           <button onClick={onClose} style={ghostButtonStyle}>
@@ -583,65 +687,55 @@ function PreviewModal({ item, onClose }) {
           </button>
         </div>
 
-        <div
-          style={{
-            marginTop: "18px",
-            overflow: "hidden",
-            borderRadius: "22px",
-            border: "1px solid rgba(255,255,255,0.08)",
-            background: "rgba(255,255,255,0.03)",
-          }}
-        >
-          {isVideo ? (
-            <video
-              controls
-              preload="metadata"
-              style={{
-                width: "100%",
-                display: "block",
-                maxHeight: "70vh",
-                objectFit: "contain",
-                background: "#1b0010",
-              }}
-            >
-              <source src={mediaUrl} />
-            </video>
-          ) : (
-            <img
-              src={mediaUrl}
-              alt={item.title || "Memory"}
-              style={{
-                width: "100%",
-                display: "block",
-                maxHeight: "70vh",
-                objectFit: "contain",
-                background: "#1b0010",
-              }}
-            />
-          )}
-        </div>
-
-        <p
-          style={{
-            margin: "18px 0 0",
-            color: "#fff0f6",
-            lineHeight: 1.9,
-            fontSize: "15px",
-            whiteSpace: "pre-wrap",
-          }}
-        >
-          {item.description}
-        </p>
+        {item.type === "photo" ? (
+          <img
+            src={fullFileUrl}
+            alt={item.title}
+            style={{
+              width: "100%",
+              maxHeight: "72vh",
+              objectFit: "contain",
+              borderRadius: "18px",
+              display: "block",
+              background: "rgba(0,0,0,0.18)",
+            }}
+          />
+        ) : item.type === "video" ? (
+          <video
+            src={fullFileUrl}
+            controls
+            autoPlay
+            style={{
+              width: "100%",
+              maxHeight: "72vh",
+              borderRadius: "18px",
+              display: "block",
+              background: "black",
+            }}
+          />
+        ) : (
+          <div
+            style={{
+              border: "1px solid rgba(255,255,255,0.08)",
+              background: "rgba(255,255,255,0.05)",
+              borderRadius: "16px",
+              padding: "16px",
+              color: "#fff0f6",
+            }}
+          >
+            A written memory with no attached file.
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
 export default function GalleryPage({ musicCard, showAdmin = false }) {
-  const [items, setItems] = useState([]);
+  const [memories, setMemories] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [editingItem, setEditingItem] = useState(null);
-  const [selectedItem, setSelectedItem] = useState(null);
+  const [editingMemory, setEditingMemory] = useState(null);
+  const [previewItem, setPreviewItem] = useState(null);
 
   const windowWidth = useWindowWidth();
   const {
@@ -655,7 +749,7 @@ export default function GalleryPage({ musicCard, showAdmin = false }) {
 
   const [searchInput, setSearchInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
-  const [sortOrder, setSortOrder] = useState("desc");
+  const [selectedType, setSelectedType] = useState("all");
 
   const [pagination, setPagination] = useState({
     page: 1,
@@ -665,7 +759,7 @@ export default function GalleryPage({ musicCard, showAdmin = false }) {
     hasMore: false,
   });
 
-  async function fetchItems(page = 1, shouldReplace = false) {
+  async function fetchMemories(page = 1, shouldReplace = false) {
     try {
       if (page === 1) {
         setLoading(true);
@@ -674,10 +768,13 @@ export default function GalleryPage({ musicCard, showAdmin = false }) {
       const params = new URLSearchParams();
       params.set("page", String(page));
       params.set("limit", String(PAGE_LIMIT));
-      params.set("sort", sortOrder);
 
       if (searchQuery.trim()) {
         params.set("search", searchQuery.trim());
+      }
+
+      if (selectedType !== "all") {
+        params.set("type", selectedType);
       }
 
       const response = await fetch(
@@ -699,18 +796,21 @@ export default function GalleryPage({ musicCard, showAdmin = false }) {
         ? result.data.items
         : [];
       const nextPagination = result?.data?.pagination || {
-        page,
+        page: 1,
         limit: PAGE_LIMIT,
         total: nextItems.length,
         totalPages: 1,
         hasMore: false,
       };
 
-      setItems((prev) => (shouldReplace ? nextItems : [...prev, ...nextItems]));
+      setMemories((prev) =>
+        shouldReplace ? nextItems : [...prev, ...nextItems],
+      );
       setPagination(nextPagination);
     } catch (error) {
+      console.error("Failed to fetch memories:", error);
       if (page === 1) {
-        setItems([]);
+        setMemories([]);
       }
       showToast(error.message || "Failed to fetch memories.", "error");
     } finally {
@@ -721,24 +821,10 @@ export default function GalleryPage({ musicCard, showAdmin = false }) {
   }
 
   useEffect(() => {
-    fetchItems(1, true);
-  }, [searchQuery, sortOrder]);
+    fetchMemories(1, true);
+  }, [searchQuery, selectedType]);
 
-  async function handleFormSuccess() {
-    setEditingItem(null);
-    await fetchItems(1, true);
-  }
-
-  function askDeleteItem(id) {
-    openConfirm({
-      title: "Delete this memory?",
-      message:
-        "This memory will be removed permanently. This action cannot be undone.",
-      onConfirm: () => deleteItem(id),
-    });
-  }
-
-  async function deleteItem(id) {
+  async function deleteMemory(id) {
     try {
       const response = await fetch(`${API_BASE}/api/memories/${id}`, {
         method: "DELETE",
@@ -753,18 +839,18 @@ export default function GalleryPage({ musicCard, showAdmin = false }) {
       }
 
       if (!response.ok || !result?.success) {
-        throw new Error(result?.message || "Failed to delete memory.");
+        throw new Error(result?.message || "Delete failed.");
       }
 
-      if (editingItem?.id === id) {
-        setEditingItem(null);
+      if (editingMemory?.id === id) {
+        setEditingMemory(null);
       }
 
-      if (selectedItem?.id === id) {
-        setSelectedItem(null);
+      if (previewItem?.id === id) {
+        setPreviewItem(null);
       }
 
-      await fetchItems(1, true);
+      await fetchMemories(1, true);
       showToast("Memory deleted successfully.", "success");
     } catch (error) {
       showToast(error.message || "Failed to delete memory.", "error");
@@ -773,19 +859,32 @@ export default function GalleryPage({ musicCard, showAdmin = false }) {
     }
   }
 
-  function handleEditItem(item) {
-    if (!showAdmin) return;
-    setEditingItem(item);
+  function askDeleteMemory(id) {
+    openConfirm({
+      title: "Delete this memory?",
+      message:
+        "This memory will be removed from your gallery permanently. This action cannot be undone.",
+      onConfirm: () => deleteMemory(id),
+    });
+  }
+
+  function handleEditMemory(memory) {
+    setEditingMemory(memory);
     window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  async function handleFormSuccess() {
+    setEditingMemory(null);
+    await fetchMemories(1, true);
   }
 
   async function handleLoadMore() {
     if (!pagination.hasMore) return;
-    await fetchItems(pagination.page + 1, false);
+    await fetchMemories(pagination.page + 1, false);
   }
 
   async function handleShowLess() {
-    await fetchItems(1, true);
+    await fetchMemories(1, true);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -797,49 +896,52 @@ export default function GalleryPage({ musicCard, showAdmin = false }) {
   function handleResetFilters() {
     setSearchInput("");
     setSearchQuery("");
-    setSortOrder("desc");
+    setSelectedType("all");
   }
 
-  const isDesktop = windowWidth >= 1220;
-  const isTablet = windowWidth >= 860 && windowWidth < 1220;
-
-  const layoutStyle = useMemo(() => {
-    const style = {
-      display: "grid",
-      gap: "24px",
-      alignItems: "start",
-    };
-
-    if (isDesktop) {
-      style.gridTemplateColumns = showAdmin
-        ? musicCard
-          ? "320px minmax(0, 1fr) 340px"
-          : "320px minmax(0, 1fr)"
-        : musicCard
-          ? "minmax(0, 1fr) 340px"
-          : "1fr";
-    } else if (isTablet) {
-      style.gridTemplateColumns = showAdmin ? "300px minmax(0, 1fr)" : "1fr";
-    } else {
-      style.gridTemplateColumns = "1fr";
-    }
-
-    return style;
-  }, [isDesktop, isTablet, musicCard, showAdmin]);
-
-  const canShowLess = items.length > PAGE_LIMIT;
-  const showControls = pagination.hasMore || canShowLess;
-
-  const summaryText =
+  const memoryCountText =
     pagination.total === 0
       ? "No memories yet."
       : pagination.total === 1
         ? "1 memory saved."
         : `${pagination.total} memories saved.`;
 
+  const hasSideMusicColumn = Boolean(musicCard) && windowWidth >= 1700;
+  const hasFormSidebar = showAdmin && windowWidth >= 1120;
+  const shouldUseWideCard = memories.length === 1;
+
+  let layoutStyle = {
+    display: "grid",
+    gap: "28px",
+    alignItems: "start",
+  };
+
+  if (hasSideMusicColumn && hasFormSidebar) {
+    layoutStyle.gridTemplateColumns = "320px minmax(0, 1fr) 320px";
+  } else if (hasFormSidebar) {
+    layoutStyle.gridTemplateColumns = "340px minmax(0, 1fr)";
+  } else {
+    layoutStyle.gridTemplateColumns = "1fr";
+  }
+
+  let memoryGridStyle = {
+    display: "grid",
+    gap: "22px",
+    alignItems: "stretch",
+  };
+
+  if (shouldUseWideCard) {
+    memoryGridStyle.gridTemplateColumns = "1fr";
+  } else {
+    memoryGridStyle.gridTemplateColumns =
+      "repeat(auto-fit, minmax(320px, 1fr))";
+  }
+
+  const canShowLess = memories.length > PAGE_LIMIT;
+  const showControls = pagination.hasMore || canShowLess;
   const activeFilters = [
     ...(searchQuery ? [`Search: ${searchQuery}`] : []),
-    `Sort: ${sortOrder === "asc" ? "oldest first" : "newest first"}`,
+    ...(selectedType !== "all" ? [`Type: ${selectedType}`] : []),
   ];
 
   return (
@@ -848,38 +950,38 @@ export default function GalleryPage({ musicCard, showAdmin = false }) {
         style={{
           position: "relative",
           zIndex: 10,
-          maxWidth: "1380px",
+          maxWidth: "1580px",
           margin: "0 auto",
-          padding: "48px 16px",
+          padding: "48px 20px",
         }}
       >
         <SectionTitle
-          title="Gallery"
-          subtitle="A collection of photos, videos, and little love notes worth keeping close."
+          title="Gallery & Memories"
+          subtitle="Upload photos, videos, and little love notes to keep your story alive online."
         />
 
         <div style={layoutStyle}>
           {showAdmin ? (
             <div
               style={
-                isDesktop ? { position: "sticky", top: "92px" } : undefined
+                hasFormSidebar ? { position: "sticky", top: "92px" } : undefined
               }
             >
               <AdminAccessPanel showToast={showToast} />
-              <GalleryForm
+
+              <MemoryForm
                 onSuccess={handleFormSuccess}
-                editingItem={editingItem}
-                onCancelEdit={() => setEditingItem(null)}
+                editingMemory={editingMemory}
+                onCancelEdit={() => setEditingMemory(null)}
                 showToast={showToast}
-                showAdmin={showAdmin}
               />
             </div>
           ) : null}
 
           <div>
             <FilterToolbar
-              summaryText={summaryText}
-              helperText="Every saved memory matters."
+              summaryText={memoryCountText}
+              helperText="Every photo tells our story."
               searchInput={searchInput}
               onSearchInputChange={(event) =>
                 setSearchInput(event.target.value)
@@ -887,12 +989,14 @@ export default function GalleryPage({ musicCard, showAdmin = false }) {
               searchPlaceholder="Search memories..."
               secondaryControl={
                 <select
-                  value={sortOrder}
-                  onChange={(event) => setSortOrder(event.target.value)}
+                  value={selectedType}
+                  onChange={(event) => setSelectedType(event.target.value)}
                   style={adminInputStyle}
                 >
-                  <option value="desc">Newest first</option>
-                  <option value="asc">Oldest first</option>
+                  <option value="all">All types</option>
+                  <option value="photo">Photos</option>
+                  <option value="video">Videos</option>
+                  <option value="story">Stories</option>
                 </select>
               }
               onSubmit={handleSearchSubmit}
@@ -906,24 +1010,23 @@ export default function GalleryPage({ musicCard, showAdmin = false }) {
             />
 
             {loading ? (
-              <div style={adminPanelCompactStyle}>Loading memories...</div>
-            ) : items.length === 0 ? (
-              <EmptyGalleryState searchQuery={searchQuery} />
+              <div style={adminPanelStyle}>Loading memories...</div>
+            ) : memories.length === 0 ? (
+              <EmptyGalleryState
+                searchQuery={searchQuery}
+                selectedType={selectedType}
+              />
             ) : (
               <>
-                <div
-                  style={{
-                    display: "grid",
-                    gap: "20px",
-                  }}
-                >
-                  {items.map((item) => (
-                    <GalleryCard
-                      key={item.id}
-                      item={item}
-                      onOpen={setSelectedItem}
-                      onEdit={handleEditItem}
-                      onDelete={askDeleteItem}
+                <div style={memoryGridStyle}>
+                  {memories.map((memory) => (
+                    <MemoryCard
+                      key={memory.id}
+                      memory={memory}
+                      onDelete={askDeleteMemory}
+                      onEdit={handleEditMemory}
+                      onPreview={setPreviewItem}
+                      isWide={shouldUseWideCard}
                       showAdmin={showAdmin}
                     />
                   ))}
@@ -942,17 +1045,17 @@ export default function GalleryPage({ musicCard, showAdmin = false }) {
             )}
           </div>
 
-          {musicCard && isDesktop ? (
+          {musicCard && hasSideMusicColumn ? (
             <div style={{ position: "sticky", top: "92px" }}>{musicCard}</div>
           ) : null}
         </div>
 
-        {musicCard && !isDesktop ? (
-          <div style={{ marginTop: "24px" }}>{musicCard}</div>
+        {musicCard && !hasSideMusicColumn ? (
+          <div style={{ marginTop: "28px" }}>{musicCard}</div>
         ) : null}
       </section>
 
-      <PreviewModal item={selectedItem} onClose={() => setSelectedItem(null)} />
+      <PreviewModal item={previewItem} onClose={() => setPreviewItem(null)} />
 
       <ConfirmModal
         open={confirmState.open}

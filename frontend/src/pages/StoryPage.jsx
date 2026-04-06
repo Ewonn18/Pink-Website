@@ -6,52 +6,103 @@ import FilterToolbar from "../components/FilterToolbar";
 import ListControls from "../components/ListControls";
 import AdminFormActions from "../components/AdminFormActions";
 import AdminAccessPanel from "../components/AdminAccessPanel";
-import { API_BASE, fallbackLoveStoryTimeline } from "../data/siteContent";
+import { API_BASE } from "../data/siteContent";
 import useWindowWidth from "../hooks/useWindowWidth";
 import useFeedbackUI from "../hooks/useFeedbackUI";
 import { getAdminHeaders } from "../utils/adminAuth";
 import {
-  adminPanelCompactStyle,
-  adminPanelTitleWithTopMarginStyle,
+  adminPanelStyle,
+  adminPanelTitleStyle,
   adminPanelSubtitleStyle,
   adminTopBadgeStyle,
   adminFieldLabelStyle,
   adminInputStyle,
   adminTextareaStyle,
   adminActiveFilterPillStyle,
-  adminDateBadgeStyle,
+  adminFilePickerRowStyle,
+  adminFilePickerButtonStyle,
+  adminFileNameStyle,
+  adminTypeBadgeStyle,
+  adminMediaHintStyle,
 } from "../styles/adminForm";
 import {
   primaryButtonStyle,
+  secondaryButtonStyle,
   ghostButtonStyle,
   dangerButtonStyle,
 } from "../styles/buttons";
 
-const PAGE_LIMIT = 5;
+const PAGE_LIMIT = 6;
 
-function StoryForm({ onSuccess, editingStory, onCancelEdit, showToast }) {
+function resolveMediaUrl(fileUrl) {
+  if (!fileUrl || typeof fileUrl !== "string") return "";
+
+  if (fileUrl.startsWith("http://") || fileUrl.startsWith("https://")) {
+    return fileUrl;
+  }
+
+  return `${API_BASE}${fileUrl}`;
+}
+
+function formatMemoryDate(value) {
+  try {
+    return new Date(value).toLocaleString("en-US", {
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  } catch {
+    return value;
+  }
+}
+
+function truncateFileName(name, maxLength = 32) {
+  if (!name) return "No file selected";
+  if (name.length <= maxLength) return name;
+
+  const dotIndex = name.lastIndexOf(".");
+  if (dotIndex === -1) {
+    return `${name.slice(0, maxLength - 3)}...`;
+  }
+
+  const extension = name.slice(dotIndex);
+  const base = name.slice(0, dotIndex);
+  const allowedBaseLength = Math.max(8, maxLength - extension.length - 3);
+
+  return `${base.slice(0, allowedBaseLength)}...${extension}`;
+}
+
+function MemoryForm({ onSuccess, editingMemory, onCancelEdit, showToast }) {
   const [form, setForm] = useState({
-    date: "",
     title: "",
-    text: "",
+    description: "",
+    type: "photo",
   });
-  const [submitting, setSubmitting] = useState(false);
+  const [file, setFile] = useState(null);
+  const [removeFile, setRemoveFile] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (editingStory) {
+    if (editingMemory) {
       setForm({
-        date: editingStory.date || "",
-        title: editingStory.title || "",
-        text: editingStory.text || "",
+        title: editingMemory.title || "",
+        description: editingMemory.description || "",
+        type: editingMemory.type || "photo",
       });
+      setFile(null);
+      setRemoveFile(false);
     } else {
       setForm({
-        date: "",
         title: "",
-        text: "",
+        description: "",
+        type: "photo",
       });
+      setFile(null);
+      setRemoveFile(false);
     }
-  }, [editingStory]);
+  }, [editingMemory]);
 
   function handleChange(event) {
     const { name, value } = event.target;
@@ -61,108 +112,212 @@ function StoryForm({ onSuccess, editingStory, onCancelEdit, showToast }) {
     }));
   }
 
+  const hasExistingFile = Boolean(editingMemory?.fileUrl);
+
   async function handleSubmit(event) {
     event.preventDefault();
-    setSubmitting(true);
+    setLoading(true);
 
     try {
-      const isEditing = Boolean(editingStory);
-      const url = isEditing
-        ? `${API_BASE}/api/stories/${editingStory.id}`
-        : `${API_BASE}/api/stories`;
+      const isEditing = Boolean(editingMemory);
 
-      const response = await fetch(url, {
-        method: isEditing ? "PUT" : "POST",
-        headers: getAdminHeaders({
-          "Content-Type": "application/json",
-        }),
-        body: JSON.stringify(form),
-      });
+      if (isEditing) {
+        const formData = new FormData();
+        formData.append("title", form.title);
+        formData.append("description", form.description);
+        formData.append("type", form.type);
+        formData.append("removeFile", String(removeFile));
 
-      let result = null;
-      try {
-        result = await response.json();
-      } catch {
-        result = null;
-      }
+        if (file) {
+          formData.append("file", file);
+        }
 
-      if (!response.ok || !result?.success) {
-        throw new Error(
-          result?.message ||
-            (isEditing ? "Failed to update story." : "Failed to create story."),
+        const response = await fetch(
+          `${API_BASE}/api/memories/${editingMemory.id}`,
+          {
+            method: "PUT",
+            headers: getAdminHeaders(),
+            body: formData,
+          },
         );
+
+        let result = null;
+        try {
+          result = await response.json();
+        } catch {
+          result = null;
+        }
+
+        if (!response.ok || !result?.success) {
+          throw new Error(result?.message || "Failed to update memory.");
+        }
+      } else {
+        const formData = new FormData();
+        formData.append("title", form.title);
+        formData.append("description", form.description);
+        formData.append("type", form.type);
+
+        if (file) {
+          formData.append("file", file);
+        }
+
+        const response = await fetch(`${API_BASE}/api/memories`, {
+          method: "POST",
+          headers: getAdminHeaders(),
+          body: formData,
+        });
+
+        let result = null;
+        try {
+          result = await response.json();
+        } catch {
+          result = null;
+        }
+
+        if (!response.ok || !result?.success) {
+          throw new Error(result?.message || "Failed to upload memory.");
+        }
       }
 
-      setForm({ date: "", title: "", text: "" });
+      setForm({ title: "", description: "", type: "photo" });
+      setFile(null);
+      setRemoveFile(false);
       onSuccess();
 
       showToast(
-        isEditing ? "Story updated successfully." : "Story added successfully.",
+        editingMemory
+          ? "Memory updated successfully."
+          : "Memory uploaded successfully.",
         "success",
       );
     } catch (error) {
-      showToast(error.message || "Failed to save story.", "error");
+      showToast(error.message || "Failed to save memory.", "error");
     } finally {
-      setSubmitting(false);
+      setLoading(false);
     }
   }
 
-  return (
-    <form onSubmit={handleSubmit} style={adminPanelCompactStyle}>
-      <div style={adminTopBadgeStyle}>Timeline Editor</div>
+  const canShowFileInput = !editingMemory || form.type !== "story";
+  const canReplaceFile = editingMemory && form.type !== "story";
+  const canRemoveExistingFile = editingMemory && hasExistingFile;
 
-      <h3 style={adminPanelTitleWithTopMarginStyle}>
-        {editingStory ? "Edit Story" : "Add a Story"}
+  return (
+    <form onSubmit={handleSubmit} style={adminPanelStyle}>
+      <div style={adminTopBadgeStyle}>Memory Uploader</div>
+
+      <h3 style={adminPanelTitleStyle}>
+        {editingMemory ? "Edit Memory" : "Upload a Memory"}
       </h3>
 
       <p style={adminPanelSubtitleStyle}>
-        Add timeline moments that tell your story one memory at a time.
+        Save photos, videos, or little love notes in one beautiful place.
       </p>
 
-      <div style={{ display: "grid", gap: "16px", marginTop: "20px" }}>
+      <div style={{ display: "grid", gap: "16px", marginTop: "22px" }}>
         <div>
-          <label style={adminFieldLabelStyle}>Date</label>
+          <label style={adminFieldLabelStyle}>Memory title</label>
           <input
-            type="date"
-            name="date"
-            value={form.date}
-            onChange={handleChange}
-            required
-            style={adminInputStyle}
-          />
-        </div>
-
-        <div>
-          <label style={adminFieldLabelStyle}>Story title</label>
-          <input
-            type="text"
             name="title"
             value={form.title}
             onChange={handleChange}
-            placeholder="Story title"
+            placeholder="Example: First museum date"
             required
             style={adminInputStyle}
           />
         </div>
 
         <div>
-          <label style={adminFieldLabelStyle}>Story text</label>
+          <label style={adminFieldLabelStyle}>Description</label>
           <textarea
-            name="text"
-            value={form.text}
+            name="description"
+            value={form.description}
             onChange={handleChange}
-            placeholder="Write the story here..."
-            rows={6}
+            placeholder="Write what made this moment special..."
+            rows={5}
             required
-            style={adminTextareaStyle}
+            style={{
+              ...adminTextareaStyle,
+              minHeight: "138px",
+            }}
           />
         </div>
 
+        <div>
+          <label style={adminFieldLabelStyle}>Type</label>
+          <select
+            name="type"
+            value={form.type}
+            onChange={handleChange}
+            style={adminInputStyle}
+          >
+            <option value="photo">Photo</option>
+            <option value="video">Video</option>
+            <option value="story">Story</option>
+          </select>
+        </div>
+
+        {canShowFileInput ? (
+          <div>
+            <label style={adminFieldLabelStyle}>
+              {editingMemory ? "Replace file (optional)" : "Photo or video"}
+            </label>
+
+            <div style={adminFilePickerRowStyle}>
+              <label style={adminFilePickerButtonStyle}>
+                <input
+                  type="file"
+                  accept="image/*,video/*"
+                  onChange={(event) => setFile(event.target.files?.[0] || null)}
+                  style={{ display: "none" }}
+                />
+                {editingMemory ? "Choose New File" : "Choose File"}
+              </label>
+
+              <div style={adminFileNameStyle}>
+                {truncateFileName(file?.name)}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {canReplaceFile && canRemoveExistingFile ? (
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "10px",
+              color: "#ffe7f1",
+              fontSize: "14px",
+              fontWeight: 600,
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={removeFile}
+              onChange={(event) => setRemoveFile(event.target.checked)}
+            />
+            Remove current attached media
+          </label>
+        ) : null}
+
+        {editingMemory && form.type === "story" ? (
+          <div
+            style={{
+              ...adminInputStyle,
+              color: "#ffd8e7",
+              lineHeight: 1.6,
+            }}
+          >
+            Story memories do not keep an uploaded file. If this memory had
+            media before, it will be removed when you save.
+          </div>
+        ) : null}
+
         <AdminFormActions
-          isEditing={Boolean(editingStory)}
-          isLoading={submitting}
-          createText="Add Story"
-          createLoadingText="Adding..."
+          isEditing={Boolean(editingMemory)}
+          isLoading={loading}
+          createText="Save Memory"
+          createLoadingText="Uploading..."
           editText="Save Changes"
           editLoadingText="Saving..."
           onCancel={onCancelEdit}
@@ -174,149 +329,413 @@ function StoryForm({ onSuccess, editingStory, onCancelEdit, showToast }) {
   );
 }
 
-function StoryCard({
-  item,
-  hasLineBelow,
-  onEdit,
+function MemoryCard({
+  memory,
   onDelete,
+  onEdit,
+  onPreview,
+  isWide = false,
   showAdmin = false,
 }) {
+  const fullFileUrl = resolveMediaUrl(memory.fileUrl);
+
   return (
     <div
+      className="media-card"
       style={{
-        position: "relative",
-        paddingLeft: "30px",
+        ...adminPanelStyle,
+        padding: isWide ? "24px" : "22px",
+        overflow: "hidden",
+        height: "100%",
+        display: "flex",
+        flexDirection: "column",
       }}
     >
       <div
         style={{
-          position: "absolute",
-          left: "6px",
-          top: "8px",
-          bottom: hasLineBelow ? "-20px" : "0",
-          width: "2px",
-          background: "rgba(255,255,255,0.10)",
-        }}
-      />
-
-      <div
-        style={{
-          position: "absolute",
-          left: 0,
-          top: "12px",
-          width: "14px",
-          height: "14px",
-          borderRadius: "999px",
-          background: "linear-gradient(180deg, #ff5ea2 0%, #ff2e86 100%)",
-          boxShadow: "0 0 0 5px rgba(255,255,255,0.06)",
-        }}
-      />
-
-      <div
-        style={{
-          ...adminPanelCompactStyle,
-          padding: "20px 22px",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          gap: "14px",
+          flexWrap: "wrap",
         }}
       >
-        <div
-          style={{
-            display: "flex",
-            gap: "14px",
-            justifyContent: "space-between",
-            alignItems: "flex-start",
-            flexWrap: "wrap",
-          }}
-        >
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={adminDateBadgeStyle}>
-              {new Date(item.date).toLocaleDateString("en-US", {
-                month: "long",
-                day: "numeric",
-                year: "numeric",
-              })}
-            </div>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={adminTypeBadgeStyle}>{memory.type}</div>
 
-            <h3
-              style={{
-                margin: "14px 0 0",
-                fontSize: "24px",
-                fontWeight: 800,
-                color: "#ffe8f1",
-                lineHeight: 1.2,
-              }}
-            >
-              {item.title}
-            </h3>
-          </div>
+          <h3
+            style={{
+              margin: "14px 0 0",
+              fontSize: isWide ? "30px" : "24px",
+              fontWeight: 800,
+              lineHeight: 1.15,
+              color: "#ffe8f1",
+              overflowWrap: "anywhere",
+            }}
+          >
+            {memory.title}
+          </h3>
+
+          <p
+            style={{
+              margin: "10px 0 0",
+              fontSize: "13px",
+              color: "#ffd3e4",
+              lineHeight: 1.6,
+            }}
+          >
+            {formatMemoryDate(memory.createdAt)}
+          </p>
+        </div>
+
+        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+          <button
+            onClick={() => onPreview(memory)}
+            style={secondaryButtonStyle}
+          >
+            View
+          </button>
 
           {showAdmin ? (
-            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-              <button onClick={() => onEdit(item)} style={ghostButtonStyle}>
+            <>
+              <button onClick={() => onEdit(memory)} style={ghostButtonStyle}>
                 Edit
               </button>
+
               <button
-                onClick={() => onDelete(item.id)}
+                onClick={() => onDelete(memory.id)}
                 style={dangerButtonStyle}
               >
                 Delete
               </button>
-            </div>
+            </>
           ) : null}
         </div>
+      </div>
+
+      {memory.fileUrl && memory.type === "photo" ? (
+        <div
+          onClick={() => onPreview(memory)}
+          style={{
+            marginTop: "22px",
+            cursor: "pointer",
+          }}
+        >
+          <div
+            style={{
+              overflow: "hidden",
+              borderRadius: "22px",
+              border: "1px solid rgba(255,255,255,0.08)",
+              boxShadow: "0 14px 30px rgba(0,0,0,0.18)",
+            }}
+          >
+            <img
+              src={fullFileUrl}
+              alt={memory.title}
+              loading="lazy"
+              style={{
+                width: "100%",
+                aspectRatio: isWide ? "16 / 10.5" : "4 / 3.8",
+                objectFit: "cover",
+                display: "block",
+              }}
+            />
+          </div>
+
+          <div style={adminMediaHintStyle}>Tap to view full photo</div>
+        </div>
+      ) : null}
+
+      {memory.fileUrl && memory.type === "video" ? (
+        <div
+          onClick={() => onPreview(memory)}
+          style={{
+            marginTop: "22px",
+            cursor: "pointer",
+          }}
+        >
+          <div
+            style={{
+              overflow: "hidden",
+              borderRadius: "22px",
+              border: "1px solid rgba(255,255,255,0.08)",
+              boxShadow: "0 14px 30px rgba(0,0,0,0.18)",
+              background: "black",
+            }}
+          >
+            <video
+              src={fullFileUrl}
+              preload="metadata"
+              style={{
+                width: "100%",
+                aspectRatio: isWide ? "16 / 10.5" : "4 / 3.8",
+                objectFit: "cover",
+                display: "block",
+              }}
+              muted
+            />
+          </div>
+
+          <div style={adminMediaHintStyle}>Tap to play full video</div>
+        </div>
+      ) : null}
+
+      {!memory.fileUrl && memory.type === "story" ? (
+        <div
+          style={{
+            marginTop: "22px",
+            border: "1px solid rgba(255,255,255,0.08)",
+            background: "rgba(255,255,255,0.04)",
+            borderRadius: "18px",
+            padding: "16px",
+            color: "#ffdce9",
+            fontSize: "13px",
+            lineHeight: 1.6,
+          }}
+        >
+          This is a written memory with no attached file.
+        </div>
+      ) : null}
+
+      <div
+        style={{
+          marginTop: "18px",
+          borderRadius: "18px",
+          border: "1px solid rgba(255,255,255,0.08)",
+          background: "rgba(255,255,255,0.05)",
+          padding: isWide ? "18px" : "16px",
+          flex: 1,
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "space-between",
+          gap: "10px",
+        }}
+      >
+        <p
+          style={{
+            margin: 0,
+            color: "#fff0f6",
+            lineHeight: 1.85,
+            fontSize: isWide ? "16px" : "15px",
+            overflowWrap: "anywhere",
+            display: "-webkit-box",
+            WebkitLineClamp: 4,
+            WebkitBoxOrient: "vertical",
+            overflow: "hidden",
+          }}
+        >
+          {memory.description}
+        </p>
 
         <p
           style={{
-            margin: "14px 0 0",
-            lineHeight: 1.85,
-            color: "#fff0f6",
-            fontSize: "15px",
-            overflowWrap: "anywhere",
+            margin: 0,
+            fontSize: "12px",
+            color: "#ffd8e7",
+            fontWeight: 600,
           }}
         >
-          {item.text}
+          Open the preview to see the full memory.
         </p>
       </div>
     </div>
   );
 }
 
-function EmptyStoryState({ searchQuery }) {
-  const hasSearch = searchQuery.trim();
+function EmptyGalleryState({ searchQuery, selectedType }) {
+  const hasFilters = searchQuery.trim() || selectedType !== "all";
 
   return (
-    <div style={adminPanelCompactStyle}>
-      <h3
-        style={{
-          margin: 0,
-          fontSize: "24px",
-          fontWeight: 800,
-          color: "#ffe8f1",
-        }}
-      >
-        {hasSearch ? "No stories matched" : "No story entries yet"}
-      </h3>
+    <div
+      style={{
+        ...adminPanelStyle,
+        minHeight: "260px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        textAlign: "center",
+        padding: "28px",
+      }}
+    >
+      <div style={{ maxWidth: "460px" }}>
+        <div
+          style={{
+            width: "64px",
+            height: "64px",
+            margin: "0 auto 18px",
+            borderRadius: "999px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "rgba(255,255,255,0.08)",
+            border: "1px solid rgba(255,255,255,0.10)",
+            fontSize: "28px",
+          }}
+        >
+          ♡
+        </div>
 
-      <p
-        style={{
-          marginTop: "10px",
-          color: "#ffd8e7",
-          lineHeight: 1.7,
-          fontSize: "15px",
-        }}
-      >
-        {hasSearch
-          ? "Try a different search word."
-          : "Add your first timeline memory to start your love story here."}
-      </p>
+        <h3
+          style={{
+            margin: 0,
+            fontSize: "24px",
+            fontWeight: 800,
+            color: "#ffe8f1",
+          }}
+        >
+          {hasFilters ? "No memories matched" : "Your gallery is still empty"}
+        </h3>
+
+        <p
+          style={{
+            marginTop: "10px",
+            fontSize: "15px",
+            lineHeight: 1.7,
+            color: "#ffd8e7",
+          }}
+        >
+          {hasFilters
+            ? "Try a different search word or change the selected memory type."
+            : "Start with your first photo, video, or little love note and build this page into a timeline of your sweetest memories together."}
+        </p>
+      </div>
     </div>
   );
 }
 
-export default function StoryPage({ musicCard, showAdmin = false }) {
-  const [stories, setStories] = useState([]);
+function PreviewModal({ item, onClose }) {
+  if (!item) return null;
+
+  const fullFileUrl = resolveMediaUrl(item.fileUrl);
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 1000,
+        background: "rgba(0,0,0,0.82)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "20px",
+      }}
+    >
+      <div
+        onClick={(event) => event.stopPropagation()}
+        style={{
+          width: "min(1000px, 100%)",
+          maxHeight: "90vh",
+          overflow: "auto",
+          borderRadius: "24px",
+          border: "1px solid rgba(255,255,255,0.12)",
+          background: "rgba(48,0,24,0.95)",
+          padding: "20px",
+          boxShadow: "0 18px 40px rgba(0,0,0,0.35)",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: "12px",
+            alignItems: "flex-start",
+            marginBottom: "16px",
+            flexWrap: "wrap",
+          }}
+        >
+          <div>
+            <p
+              style={{
+                margin: 0,
+                fontSize: "11px",
+                fontWeight: 800,
+                letterSpacing: "0.14em",
+                textTransform: "uppercase",
+                color: "#ffd2e4",
+              }}
+            >
+              {item.type}
+            </p>
+
+            <h3
+              style={{
+                margin: "8px 0 0",
+                color: "#ffe8f1",
+                fontSize: "26px",
+                lineHeight: 1.15,
+              }}
+            >
+              {item.title}
+            </h3>
+
+            <p
+              style={{
+                margin: "10px 0 0",
+                color: "#fff0f6",
+                lineHeight: 1.8,
+                fontSize: "15px",
+              }}
+            >
+              {item.description}
+            </p>
+          </div>
+
+          <button onClick={onClose} style={ghostButtonStyle}>
+            Close
+          </button>
+        </div>
+
+        {item.type === "photo" ? (
+          <img
+            src={fullFileUrl}
+            alt={item.title}
+            style={{
+              width: "100%",
+              maxHeight: "72vh",
+              objectFit: "contain",
+              borderRadius: "18px",
+              display: "block",
+              background: "rgba(0,0,0,0.18)",
+            }}
+          />
+        ) : item.type === "video" ? (
+          <video
+            src={fullFileUrl}
+            controls
+            autoPlay
+            style={{
+              width: "100%",
+              maxHeight: "72vh",
+              borderRadius: "18px",
+              display: "block",
+              background: "black",
+            }}
+          />
+        ) : (
+          <div
+            style={{
+              border: "1px solid rgba(255,255,255,0.08)",
+              background: "rgba(255,255,255,0.05)",
+              borderRadius: "16px",
+              padding: "16px",
+              color: "#fff0f6",
+            }}
+          >
+            A written memory with no attached file.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default function GalleryPage({ musicCard, showAdmin = false }) {
+  const [memories, setMemories] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [editingStory, setEditingStory] = useState(null);
-  const [usingFallback, setUsingFallback] = useState(false);
+  const [editingMemory, setEditingMemory] = useState(null);
+  const [previewItem, setPreviewItem] = useState(null);
 
   const windowWidth = useWindowWidth();
   const {
@@ -330,7 +749,7 @@ export default function StoryPage({ musicCard, showAdmin = false }) {
 
   const [searchInput, setSearchInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
-  const [sortOrder, setSortOrder] = useState("asc");
+  const [selectedType, setSelectedType] = useState("all");
 
   const [pagination, setPagination] = useState({
     page: 1,
@@ -340,7 +759,7 @@ export default function StoryPage({ musicCard, showAdmin = false }) {
     hasMore: false,
   });
 
-  async function fetchStories(page = 1, shouldReplace = false) {
+  async function fetchMemories(page = 1, shouldReplace = false) {
     try {
       if (page === 1) {
         setLoading(true);
@@ -349,14 +768,17 @@ export default function StoryPage({ musicCard, showAdmin = false }) {
       const params = new URLSearchParams();
       params.set("page", String(page));
       params.set("limit", String(PAGE_LIMIT));
-      params.set("sort", sortOrder);
 
       if (searchQuery.trim()) {
         params.set("search", searchQuery.trim());
       }
 
+      if (selectedType !== "all") {
+        params.set("type", selectedType);
+      }
+
       const response = await fetch(
-        `${API_BASE}/api/stories?${params.toString()}`,
+        `${API_BASE}/api/memories?${params.toString()}`,
       );
 
       let result = null;
@@ -367,13 +789,12 @@ export default function StoryPage({ musicCard, showAdmin = false }) {
       }
 
       if (!response.ok || !result?.success) {
-        throw new Error(result?.message || "Failed to fetch stories.");
+        throw new Error(result?.message || "Failed to fetch memories.");
       }
 
       const nextItems = Array.isArray(result?.data?.items)
         ? result.data.items
         : [];
-
       const nextPagination = result?.data?.pagination || {
         page: 1,
         limit: PAGE_LIMIT,
@@ -382,43 +803,16 @@ export default function StoryPage({ musicCard, showAdmin = false }) {
         hasMore: false,
       };
 
-      if (page === 1 && nextPagination.total === 0 && !searchQuery.trim()) {
-        setUsingFallback(true);
-        setStories(fallbackLoveStoryTimeline);
-        setPagination({
-          page: 1,
-          limit: PAGE_LIMIT,
-          total: fallbackLoveStoryTimeline.length,
-          totalPages: 1,
-          hasMore: false,
-        });
-        return;
-      }
-
-      setUsingFallback(false);
-      setStories((prev) =>
+      setMemories((prev) =>
         shouldReplace ? nextItems : [...prev, ...nextItems],
       );
       setPagination(nextPagination);
     } catch (error) {
-      console.error("Failed to fetch stories:", error);
-
-      if (page === 1 && !searchQuery.trim()) {
-        setUsingFallback(true);
-        setStories(fallbackLoveStoryTimeline);
-        setPagination({
-          page: 1,
-          limit: PAGE_LIMIT,
-          total: fallbackLoveStoryTimeline.length,
-          totalPages: 1,
-          hasMore: false,
-        });
-      } else if (page === 1) {
-        setStories([]);
-        setUsingFallback(false);
+      console.error("Failed to fetch memories:", error);
+      if (page === 1) {
+        setMemories([]);
       }
-
-      showToast(error.message || "Failed to fetch stories.", "error");
+      showToast(error.message || "Failed to fetch memories.", "error");
     } finally {
       if (page === 1) {
         setLoading(false);
@@ -427,18 +821,12 @@ export default function StoryPage({ musicCard, showAdmin = false }) {
   }
 
   useEffect(() => {
-    fetchStories(1, true);
-  }, [searchQuery, sortOrder]);
+    fetchMemories(1, true);
+  }, [searchQuery, selectedType]);
 
-  useEffect(() => {
-    if (!showAdmin) {
-      setEditingStory(null);
-    }
-  }, [showAdmin]);
-
-  async function deleteStory(id) {
+  async function deleteMemory(id) {
     try {
-      const response = await fetch(`${API_BASE}/api/stories/${id}`, {
+      const response = await fetch(`${API_BASE}/api/memories/${id}`, {
         method: "DELETE",
         headers: getAdminHeaders(),
       });
@@ -451,49 +839,52 @@ export default function StoryPage({ musicCard, showAdmin = false }) {
       }
 
       if (!response.ok || !result?.success) {
-        throw new Error(result?.message || "Failed to delete story.");
+        throw new Error(result?.message || "Delete failed.");
       }
 
-      if (editingStory?.id === id) {
-        setEditingStory(null);
+      if (editingMemory?.id === id) {
+        setEditingMemory(null);
       }
 
-      await fetchStories(1, true);
-      showToast("Story deleted successfully.", "success");
+      if (previewItem?.id === id) {
+        setPreviewItem(null);
+      }
+
+      await fetchMemories(1, true);
+      showToast("Memory deleted successfully.", "success");
     } catch (error) {
-      showToast(error.message || "Failed to delete story.", "error");
+      showToast(error.message || "Failed to delete memory.", "error");
     } finally {
       closeConfirm();
     }
   }
 
-  function askDeleteStory(id) {
+  function askDeleteMemory(id) {
     openConfirm({
-      title: "Delete this story?",
+      title: "Delete this memory?",
       message:
-        "This story will be removed from your timeline permanently. This action cannot be undone.",
-      onConfirm: () => deleteStory(id),
+        "This memory will be removed from your gallery permanently. This action cannot be undone.",
+      onConfirm: () => deleteMemory(id),
     });
   }
 
-  function handleEditStory(story) {
-    if (!showAdmin) return;
-    setEditingStory(story);
+  function handleEditMemory(memory) {
+    setEditingMemory(memory);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   async function handleFormSuccess() {
-    setEditingStory(null);
-    await fetchStories(1, true);
+    setEditingMemory(null);
+    await fetchMemories(1, true);
   }
 
   async function handleLoadMore() {
-    if (usingFallback || !pagination.hasMore) return;
-    await fetchStories(pagination.page + 1, false);
+    if (!pagination.hasMore) return;
+    await fetchMemories(pagination.page + 1, false);
   }
 
   async function handleShowLess() {
-    await fetchStories(1, true);
+    await fetchMemories(1, true);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -505,49 +896,52 @@ export default function StoryPage({ musicCard, showAdmin = false }) {
   function handleResetFilters() {
     setSearchInput("");
     setSearchQuery("");
-    setSortOrder("asc");
+    setSelectedType("all");
   }
 
-  const isDesktop = windowWidth >= 1220;
-  const isTablet = windowWidth >= 860 && windowWidth < 1220;
+  const memoryCountText =
+    pagination.total === 0
+      ? "No memories yet."
+      : pagination.total === 1
+        ? "1 memory saved."
+        : `${pagination.total} memories saved.`;
+
+  const hasSideMusicColumn = Boolean(musicCard) && windowWidth >= 1700;
+  const hasFormSidebar = showAdmin && windowWidth >= 1120;
+  const shouldUseWideCard = memories.length === 1;
 
   let layoutStyle = {
     display: "grid",
-    gap: "24px",
+    gap: "28px",
     alignItems: "start",
   };
 
-  if (isDesktop) {
-    layoutStyle.gridTemplateColumns =
-      showAdmin && musicCard
-        ? "320px minmax(0, 1fr) 340px"
-        : showAdmin
-          ? "320px minmax(0, 1fr)"
-          : musicCard
-            ? "minmax(0, 1fr) 340px"
-            : "1fr";
-  } else if (isTablet) {
-    layoutStyle.gridTemplateColumns = showAdmin
-      ? "300px minmax(0, 1fr)"
-      : "1fr";
+  if (hasSideMusicColumn && hasFormSidebar) {
+    layoutStyle.gridTemplateColumns = "320px minmax(0, 1fr) 320px";
+  } else if (hasFormSidebar) {
+    layoutStyle.gridTemplateColumns = "340px minmax(0, 1fr)";
   } else {
     layoutStyle.gridTemplateColumns = "1fr";
   }
 
-  const canShowLess = !usingFallback && stories.length > PAGE_LIMIT;
-  const showControls = (!usingFallback && pagination.hasMore) || canShowLess;
+  let memoryGridStyle = {
+    display: "grid",
+    gap: "22px",
+    alignItems: "stretch",
+  };
 
-  const summaryText = usingFallback
-    ? `${fallbackLoveStoryTimeline.length} fallback stories showing.`
-    : pagination.total === 0
-      ? "No stories yet."
-      : pagination.total === 1
-        ? "1 story saved."
-        : `${pagination.total} stories saved.`;
+  if (shouldUseWideCard) {
+    memoryGridStyle.gridTemplateColumns = "1fr";
+  } else {
+    memoryGridStyle.gridTemplateColumns =
+      "repeat(auto-fit, minmax(320px, 1fr))";
+  }
 
+  const canShowLess = memories.length > PAGE_LIMIT;
+  const showControls = pagination.hasMore || canShowLess;
   const activeFilters = [
     ...(searchQuery ? [`Search: ${searchQuery}`] : []),
-    `Sort: ${sortOrder === "desc" ? "newest first" : "oldest first"}`,
+    ...(selectedType !== "all" ? [`Type: ${selectedType}`] : []),
   ];
 
   return (
@@ -556,29 +950,29 @@ export default function StoryPage({ musicCard, showAdmin = false }) {
         style={{
           position: "relative",
           zIndex: 10,
-          maxWidth: "1380px",
+          maxWidth: "1580px",
           margin: "0 auto",
-          padding: "48px 16px",
+          padding: "48px 20px",
         }}
       >
         <SectionTitle
-          title="Our Story"
-          subtitle="A timeline of little moments, big feelings, and the memories that made us."
+          title="Gallery & Memories"
+          subtitle="Upload photos, videos, and little love notes to keep your story alive online."
         />
 
         <div style={layoutStyle}>
           {showAdmin ? (
             <div
               style={
-                isDesktop ? { position: "sticky", top: "92px" } : undefined
+                hasFormSidebar ? { position: "sticky", top: "92px" } : undefined
               }
             >
               <AdminAccessPanel showToast={showToast} />
 
-              <StoryForm
+              <MemoryForm
                 onSuccess={handleFormSuccess}
-                editingStory={editingStory}
-                onCancelEdit={() => setEditingStory(null)}
+                editingMemory={editingMemory}
+                onCancelEdit={() => setEditingMemory(null)}
                 showToast={showToast}
               />
             </div>
@@ -586,21 +980,23 @@ export default function StoryPage({ musicCard, showAdmin = false }) {
 
           <div>
             <FilterToolbar
-              summaryText={summaryText}
-              helperText="Every chapter matters."
+              summaryText={memoryCountText}
+              helperText="Every photo tells our story."
               searchInput={searchInput}
               onSearchInputChange={(event) =>
                 setSearchInput(event.target.value)
               }
-              searchPlaceholder="Search stories..."
+              searchPlaceholder="Search memories..."
               secondaryControl={
                 <select
-                  value={sortOrder}
-                  onChange={(event) => setSortOrder(event.target.value)}
+                  value={selectedType}
+                  onChange={(event) => setSelectedType(event.target.value)}
                   style={adminInputStyle}
                 >
-                  <option value="asc">Oldest first</option>
-                  <option value="desc">Newest first</option>
+                  <option value="all">All types</option>
+                  <option value="photo">Photos</option>
+                  <option value="video">Videos</option>
+                  <option value="story">Stories</option>
                 </select>
               }
               onSubmit={handleSearchSubmit}
@@ -614,24 +1010,23 @@ export default function StoryPage({ musicCard, showAdmin = false }) {
             />
 
             {loading ? (
-              <div style={adminPanelCompactStyle}>Loading our story...</div>
-            ) : stories.length === 0 ? (
-              <EmptyStoryState searchQuery={searchQuery} />
+              <div style={adminPanelStyle}>Loading memories...</div>
+            ) : memories.length === 0 ? (
+              <EmptyGalleryState
+                searchQuery={searchQuery}
+                selectedType={selectedType}
+              />
             ) : (
               <>
-                <div
-                  style={{
-                    display: "grid",
-                    gap: "20px",
-                  }}
-                >
-                  {stories.map((item, index) => (
-                    <StoryCard
-                      key={item.id}
-                      item={item}
-                      hasLineBelow={index !== stories.length - 1}
-                      onEdit={handleEditStory}
-                      onDelete={askDeleteStory}
+                <div style={memoryGridStyle}>
+                  {memories.map((memory) => (
+                    <MemoryCard
+                      key={memory.id}
+                      memory={memory}
+                      onDelete={askDeleteMemory}
+                      onEdit={handleEditMemory}
+                      onPreview={setPreviewItem}
+                      isWide={shouldUseWideCard}
                       showAdmin={showAdmin}
                     />
                   ))}
@@ -639,7 +1034,7 @@ export default function StoryPage({ musicCard, showAdmin = false }) {
 
                 <ListControls
                   showControls={showControls}
-                  canLoadMore={!usingFallback && pagination.hasMore}
+                  canLoadMore={pagination.hasMore}
                   canShowLess={canShowLess}
                   onLoadMore={handleLoadMore}
                   onShowLess={handleShowLess}
@@ -650,15 +1045,17 @@ export default function StoryPage({ musicCard, showAdmin = false }) {
             )}
           </div>
 
-          {musicCard && isDesktop ? (
+          {musicCard && hasSideMusicColumn ? (
             <div style={{ position: "sticky", top: "92px" }}>{musicCard}</div>
           ) : null}
         </div>
 
-        {musicCard && !isDesktop ? (
-          <div style={{ marginTop: "24px" }}>{musicCard}</div>
+        {musicCard && !hasSideMusicColumn ? (
+          <div style={{ marginTop: "28px" }}>{musicCard}</div>
         ) : null}
       </section>
+
+      <PreviewModal item={previewItem} onClose={() => setPreviewItem(null)} />
 
       <ConfirmModal
         open={confirmState.open}
