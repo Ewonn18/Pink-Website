@@ -12,7 +12,6 @@ import { pageMusic } from "./data/siteContent";
 import { getInitialAdminMode, exitAdminMode } from "./utils/adminAuth";
 import AdminUnlockModal from "./components/AdminUnlockModal";
 import AdminModeBadge from "./components/AdminModeBadge";
-import { useHiddenAdminTap } from "./components/HiddenAdminTrigger";
 
 function getInitialVolume() {
   try {
@@ -64,12 +63,6 @@ export default function App() {
   const handleAdminUnlocked = useCallback(() => {
     setAdminMode(true);
   }, []);
-
-  const { onInteract: onFooterSecretInteract } = useHiddenAdminTap({
-    onTrigger: openUnlockModal,
-    requiredTaps: 5,
-    windowMs: 2000,
-  });
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -247,7 +240,8 @@ export default function App() {
       <Navbar
         currentPage={currentPage}
         setCurrentPage={setCurrentPage}
-        onSecretAdminOpen={openUnlockModal}
+        adminMode={adminMode}
+        onOpenAdminModal={openUnlockModal}
       />
 
       <main key={currentPage} className="page-transition">
@@ -294,22 +288,10 @@ export default function App() {
             made with love
           </div>
 
-          <button
-            type="button"
-            onClick={onFooterSecretInteract}
-            aria-label="PINK"
+          <div
             style={{
-              display: "block",
-              margin: "12px auto 0",
-              border: "none",
-              background: "transparent",
-              cursor: "pointer",
-              padding: "12px 16px",
-              fontFamily: "inherit",
-              minHeight: "44px",
-              minWidth: "44px",
-              WebkitTapHighlightColor: "transparent",
-              touchAction: "manipulation",
+              margin: "16px auto 0",
+              padding: "4px 12px",
             }}
           >
             <span
@@ -318,12 +300,11 @@ export default function App() {
                 fontWeight: 900,
                 letterSpacing: "0.20em",
                 color: "#ffe4ef",
-                pointerEvents: "none",
               }}
             >
               PINK
             </span>
-          </button>
+          </div>
 
           <p
             style={{
