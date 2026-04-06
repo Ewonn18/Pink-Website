@@ -1,126 +1,314 @@
-import { API_BASE } from "../data/siteContent";
-import { ghostButtonStyle } from "../styles/ui";
+import { useEffect, useRef, useState } from "react";
+import FloatingHearts from "./components/FloatingHearts";
+import LoadingScreen from "./components/LoadingScreen";
+import Navbar from "./components/Navbar";
+import PageMusicCard from "./components/PageMusicCard";
+import HomePage from "./pages/HomePage";
+import StoryPage from "./pages/StoryPage";
+import GalleryPage from "./pages/GalleryPage";
+import ForHerPage from "./pages/ForHerPage";
+import ForMePage from "./pages/ForMePage";
+import { pageMusic } from "./data/siteContent";
 
-function resolveImageUrl(imageUrl) {
-  if (!imageUrl || typeof imageUrl !== "string") return "";
-
-  if (imageUrl.startsWith("http://") || imageUrl.startsWith("https://")) {
-    return imageUrl;
+function getInitialVolume() {
+  try {
+    const saved = localStorage.getItem("pink-player-volume");
+    const parsed = saved ? Number(saved) : 0.8;
+    if (!Number.isFinite(parsed)) return 0.8;
+    if (parsed < 0) return 0;
+    if (parsed > 1) return 1;
+    return parsed;
+  } catch {
+    return 0.8;
   }
-
-  return `${API_BASE}${imageUrl}`;
 }
 
-export default function FavoriteMomentPreviewModal({ item, onClose }) {
-  if (!item) return null;
+function getInitialMuted() {
+  try {
+    return localStorage.getItem("pink-player-muted") === "true";
+  } catch {
+    return false;
+  }
+}
 
-  const imageSrc = resolveImageUrl(item.imageUrl);
+export default function App() {
+  const [currentPage, setCurrentPage] = useState("Home");
+  const [isLoading, setIsLoading] = useState(true);
+
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [duration, setDuration] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [audioError, setAudioError] = useState("");
+
+  const [volume, setVolume] = useState(getInitialVolume);
+  const [isMuted, setIsMuted] = useState(getInitialMuted);
+
+  const audioRef = useRef(null);
+  const currentTrack = pageMusic[currentPage];
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setIsLoading(false);
+    }, 1800);
+
+    return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("pink-player-volume", String(volume));
+    } catch {
+      // ignore
+    }
+  }, [volume]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("pink-player-muted", String(isMuted));
+    } catch {
+      // ignore
+    }
+  }, [isMuted]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio || !currentTrack) return;
+
+    setAudioError("");
+    setIsPlaying(false);
+    setCurrentTime(0);
+    setDuration(0);
+
+    audio.pause();
+    audio.src = currentTrack.file;
+    audio.currentTime = 0;
+    audio.volume = volume;
+    audio.muted = isMuted;
+    audio.load();
+  }, [currentTrack, volume, isMuted]);
+
+  async function togglePlay() {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    if (isPlaying) {
+      audio.pause();
+      setIsPlaying(false);
+      return;
+    }
+
+    try {
+      setAudioError("");
+      await audio.play();
+      setIsPlaying(true);
+    } catch {
+      setIsPlaying(false);
+      setAudioError("The music could not start. Try clicking play again.");
+    }
+  }
+
+  function handleSeek(event) {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const nextTime = Number(event.target.value);
+    audio.currentTime = nextTime;
+    setCurrentTime(nextTime);
+  }
+
+  function handleVolumeChange(event) {
+    const nextVolume = Number(event.target.value);
+    setVolume(nextVolume);
+
+    if (nextVolume > 0 && isMuted) {
+      setIsMuted(false);
+    }
+
+    if (audioRef.current) {
+      audioRef.current.volume = nextVolume;
+    }
+  }
+
+  function toggleMute() {
+    setIsMuted((prev) => {
+      const nextMuted = !prev;
+
+      if (audioRef.current) {
+        audioRef.current.muted = nextMuted;
+      }
+
+      return nextMuted;
+    });
+  }
+
+  const sharedMusicCard = (
+    <PageMusicCard
+      currentPage={currentPage}
+      isPlaying={isPlaying}
+      currentTime={currentTime}
+      duration={duration}
+      volume={volume}
+      isMuted={isMuted}
+      audioError={audioError}
+      onTogglePlay={togglePlay}
+      onSeek={handleSeek}
+      onVolumeChange={handleVolumeChange}
+      onToggleMute={toggleMute}
+    />
+  );
+
+  let pageContent = (
+    <HomePage musicCard={sharedMusicCard} setCurrentPage={setCurrentPage} />
+  );
+
+  if (currentPage === "Our Story") {
+    pageContent = <StoryPage musicCard={sharedMusicCard} />;
+  } else if (currentPage === "Gallery") {
+    pageContent = <GalleryPage musicCard={sharedMusicCard} />;
+  } else if (currentPage === "For Her") {
+    pageContent = <ForHerPage musicCard={sharedMusicCard} />;
+  } else if (currentPage === "For Me") {
+    pageContent = <ForMePage musicCard={sharedMusicCard} />;
+  }
+
+  if (isLoading) {
+    return <LoadingScreen />;
+  }
 
   return (
-    <div
-      onClick={onClose}
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 1400,
-        background: "rgba(8,0,6,0.84)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: "20px",
-      }}
-    >
-      <div
-        className="moment-modal-card"
-        onClick={(event) => event.stopPropagation()}
+    <div style={{ minHeight: "100vh", position: "relative" }}>
+      <FloatingHearts />
+
+      <audio
+        ref={audioRef}
+        preload="metadata"
+        hidden
+        onLoadedMetadata={(event) => {
+          setDuration(event.currentTarget.duration || 0);
+          setAudioError("");
+        }}
+        onCanPlay={(event) => {
+          setDuration(event.currentTarget.duration || 0);
+          setAudioError("");
+        }}
+        onTimeUpdate={(event) => {
+          setCurrentTime(event.currentTarget.currentTime || 0);
+        }}
+        onEnded={() => {
+          setIsPlaying(false);
+          setCurrentTime(0);
+        }}
+        onPause={() => {
+          setIsPlaying(false);
+        }}
+        onPlay={() => {
+          setIsPlaying(true);
+        }}
+        onError={() => {
+          setIsPlaying(false);
+          setAudioError("Music file could not be played.");
+        }}
+      />
+
+      <Navbar currentPage={currentPage} setCurrentPage={setCurrentPage} />
+
+      <main key={currentPage} className="page-transition">
+        {pageContent}
+      </main>
+
+      <footer
         style={{
-          width: "min(760px, 100%)",
-          maxHeight: "90vh",
-          overflow: "auto",
-          borderRadius: "24px",
-          border: "1px solid rgba(255,255,255,0.12)",
-          background:
-            "linear-gradient(180deg, rgba(60,0,30,0.97) 0%, rgba(28,0,16,0.98) 100%)",
-          boxShadow: "0 20px 44px rgba(0,0,0,0.40)",
-          backdropFilter: "blur(12px)",
-          padding: "18px",
+          position: "relative",
+          zIndex: 10,
+          marginTop: "56px",
+          padding: "44px 16px",
         }}
       >
         <div
           style={{
-            display: "flex",
-            justifyContent: "space-between",
-            gap: "12px",
-            alignItems: "flex-start",
-            flexWrap: "wrap",
-            marginBottom: "14px",
+            maxWidth: "1180px",
+            margin: "0 auto",
+            borderRadius: "28px",
+            border: "1px solid rgba(255,255,255,0.12)",
+            background:
+              "linear-gradient(180deg, rgba(48,0,24,0.45) 0%, rgba(20,0,12,0.60) 100%)",
+            boxShadow: "0 18px 44px rgba(60,0,28,0.18)",
+            backdropFilter: "blur(10px)",
+            padding: "28px 22px",
+            textAlign: "center",
           }}
         >
-          <div>
-            <p style={quoteLabelStyle}>favorite moment</p>
-            <h3
-              style={{
-                margin: "8px 0 0",
-                color: "#ffe8f1",
-                fontSize: "26px",
-                lineHeight: 1.15,
-              }}
-            >
-              {item.title}
-            </h3>
-            <p
-              style={{
-                margin: "10px 0 0",
-                color: "#fff0f6",
-                lineHeight: 1.8,
-                fontSize: "15px",
-              }}
-            >
-              {item.caption}
-            </p>
+          <div
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              padding: "7px 11px",
+              borderRadius: "999px",
+              background: "rgba(255,255,255,0.06)",
+              border: "1px solid rgba(255,255,255,0.10)",
+              color: "#ffd8e7",
+              fontSize: "11px",
+              fontWeight: 800,
+              letterSpacing: "0.14em",
+              textTransform: "uppercase",
+            }}
+          >
+            made with love
           </div>
 
-          <button onClick={onClose} style={ghostButtonStyle}>
-            Close
-          </button>
-        </div>
-
-        {imageSrc ? (
-          <img
-            src={imageSrc}
-            alt={item.title}
+          <p
             style={{
-              width: "100%",
-              maxHeight: "72vh",
-              objectFit: "contain",
-              borderRadius: "18px",
-              display: "block",
-              background: "rgba(0,0,0,0.20)",
+              fontSize: "26px",
+              fontWeight: 900,
+              letterSpacing: "0.20em",
+              color: "#ffe4ef",
+              margin: "16px 0 0",
             }}
-          />
-        ) : (
-          <div style={momentFallbackStyle}>♡</div>
-        )}
-      </div>
+          >
+            PINK
+          </p>
+
+          <p
+            style={{
+              marginTop: "14px",
+              fontSize: "15px",
+              fontWeight: 500,
+              lineHeight: 1.8,
+              color: "#ffe8f1",
+              maxWidth: "760px",
+              marginLeft: "auto",
+              marginRight: "auto",
+            }}
+          >
+            Made with love, for the girl who made my world softer, brighter, and
+            more beautiful.
+          </p>
+
+          <div
+            style={{
+              marginTop: "18px",
+              display: "flex",
+              flexWrap: "wrap",
+              justifyContent: "center",
+              gap: "10px",
+            }}
+          >
+            <span style={footerPillStyle}>Our story</span>
+            <span style={footerPillStyle}>Our songs</span>
+            <span style={footerPillStyle}>Our memories</span>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }
 
-const quoteLabelStyle = {
-  margin: 0,
-  fontSize: "11px",
-  fontWeight: 800,
-  letterSpacing: "0.16em",
-  textTransform: "uppercase",
-  color: "#ffd2e4",
-};
-
-const momentFallbackStyle = {
-  width: "100%",
-  aspectRatio: "4 / 3",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  color: "#ffd8e7",
-  fontSize: "28px",
+const footerPillStyle = {
+  borderRadius: "999px",
+  border: "1px solid rgba(255,255,255,0.12)",
+  background: "rgba(255,255,255,0.05)",
+  padding: "9px 14px",
+  fontWeight: 700,
+  color: "#ffe7f1",
+  fontSize: "13px",
 };
