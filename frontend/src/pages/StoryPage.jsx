@@ -1,10 +1,29 @@
 import { useEffect, useMemo, useState } from "react";
 import SectionTitle from "../components/SectionTitle";
 import Toast from "../components/Toast";
+import ConfirmModal from "../components/ConfirmModal";
+import AdminAccessPanel from "../components/AdminAccessPanel";
+import AdminFormActions from "../components/AdminFormActions";
 import { API_BASE, fallbackLoveStoryTimeline } from "../data/siteContent";
 import useFeedbackUI from "../hooks/useFeedbackUI";
 import useWindowWidth from "../hooks/useWindowWidth";
-import { adminPanelStyle, adminTypeBadgeStyle } from "../styles/adminForm";
+import { getAdminHeaders } from "../utils/adminAuth";
+import {
+  adminPanelStyle,
+  adminPanelTitleStyle,
+  adminPanelSubtitleStyle,
+  adminTopBadgeStyle,
+  adminFieldLabelStyle,
+  adminInputStyle,
+  adminTextareaStyle,
+  adminTypeBadgeStyle,
+} from "../styles/adminForm";
+import {
+  primaryButtonStyle,
+  secondaryButtonStyle,
+  ghostButtonStyle,
+  dangerButtonStyle,
+} from "../styles/buttons";
 
 function formatTimelineDate(value) {
   try {
@@ -37,7 +56,7 @@ function buildStoryChapters(memories) {
   return memories
     .filter((item) => item?.type === "story")
     .map((item) => ({
-      id: `memory-${item.id}`,
+      id: item.id,
       date: item.createdAt,
       title: item.title || "Untitled chapter",
       text: item.description || "",
@@ -77,8 +96,8 @@ function StoryIntroCard() {
         }}
       >
         This page is for the milestones, little beginnings, and meaningful
-        chapters that turned us into us. It is not meant to be a media wall — it
-        is the softer, more personal side of everything we have built together.
+        chapters that turned us into us. It is the softer, more personal side of
+        everything you have built together.
       </p>
     </div>
   );
@@ -149,7 +168,7 @@ function StoryStats({ timelineCount, chapterCount }) {
             fontSize: "14px",
           }}
         >
-          Written memories pulled from your saved story entries.
+          Written memories pulled from saved story entries.
         </p>
       </div>
     </div>
@@ -235,13 +254,15 @@ function TimelineCard({ item, index }) {
   );
 }
 
-function ChapterCard({ chapter }) {
+function ChapterCard({ chapter, showAdmin, onEdit, onDelete }) {
   return (
     <div
       style={{
         ...adminPanelStyle,
         padding: "22px",
         height: "100%",
+        display: "flex",
+        flexDirection: "column",
       }}
     >
       <div
@@ -286,15 +307,37 @@ function ChapterCard({ chapter }) {
           fontSize: "15px",
           lineHeight: 1.85,
           whiteSpace: "pre-wrap",
+          flex: 1,
         }}
       >
         {chapter.text}
       </p>
+
+      {showAdmin ? (
+        <div
+          style={{
+            display: "flex",
+            gap: "10px",
+            flexWrap: "wrap",
+            marginTop: "18px",
+          }}
+        >
+          <button onClick={() => onEdit(chapter)} style={secondaryButtonStyle}>
+            Edit
+          </button>
+          <button
+            onClick={() => onDelete(chapter.id)}
+            style={dangerButtonStyle}
+          >
+            Delete
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }
 
-function EmptyChaptersState() {
+function EmptyChaptersState({ showAdmin }) {
   return (
     <div
       style={{
@@ -340,72 +383,222 @@ function EmptyChaptersState() {
           lineHeight: 1.8,
         }}
       >
-        Your main timeline is already here, and any saved memories marked as
-        “story” will appear below as extra chapters of your relationship.
+        {showAdmin
+          ? "Admin mode is on. You can create your first story chapter from the panel on this page."
+          : "Your main timeline is already here, and any saved memories marked as “story” will appear below as extra chapters of your relationship."}
       </p>
     </div>
   );
 }
 
-export default function StoryPage({ musicCard }) {
-  const [storyMemories, setStoryMemories] = useState([]);
-  const [loadingStories, setLoadingStories] = useState(true);
-
-  const windowWidth = useWindowWidth();
-  const { toast, showToast, hideToast } = useFeedbackUI();
+function StoryChapterForm({
+  editingChapter,
+  onSuccess,
+  onCancelEdit,
+  showToast,
+}) {
+  const [form, setForm] = useState({
+    title: "",
+    description: "",
+  });
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    let isMounted = true;
-
-    async function fetchStoryMemories() {
-      try {
-        setLoadingStories(true);
-
-        const params = new URLSearchParams();
-        params.set("page", "1");
-        params.set("limit", "50");
-        params.set("type", "story");
-
-        const response = await fetch(
-          `${API_BASE}/api/memories?${params.toString()}`,
-        );
-
-        let result = null;
-        try {
-          result = await response.json();
-        } catch {
-          result = null;
-        }
-
-        if (!response.ok || !result?.success) {
-          throw new Error(result?.message || "Failed to fetch story memories.");
-        }
-
-        const items = Array.isArray(result?.data?.items)
-          ? result.data.items
-          : [];
-
-        if (isMounted) {
-          setStoryMemories(items);
-        }
-      } catch (error) {
-        if (isMounted) {
-          setStoryMemories([]);
-          showToast(error.message || "Failed to load story memories.", "error");
-        }
-      } finally {
-        if (isMounted) {
-          setLoadingStories(false);
-        }
-      }
+    if (editingChapter) {
+      setForm({
+        title: editingChapter.title || "",
+        description: editingChapter.text || "",
+      });
+      return;
     }
 
-    fetchStoryMemories();
+    setForm({
+      title: "",
+      description: "",
+    });
+  }, [editingChapter]);
 
-    return () => {
-      isMounted = false;
-    };
-  }, [showToast]);
+  function handleChange(event) {
+    const { name, value } = event.target;
+    setForm((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
+  }
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    setLoading(true);
+
+    try {
+      const payload = {
+        title: form.title.trim(),
+        description: form.description.trim(),
+        type: "story",
+      };
+
+      const isEditing = Boolean(editingChapter);
+
+      const response = await fetch(
+        isEditing
+          ? `${API_BASE}/api/memories/${editingChapter.id}`
+          : `${API_BASE}/api/memories`,
+        {
+          method: isEditing ? "PUT" : "POST",
+          headers: {
+            ...getAdminHeaders(),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        },
+      );
+
+      let result = null;
+      try {
+        result = await response.json();
+      } catch {
+        result = null;
+      }
+
+      if (!response.ok || !result?.success) {
+        throw new Error(
+          result?.message ||
+            (isEditing
+              ? "Failed to update story chapter."
+              : "Failed to create story chapter."),
+        );
+      }
+
+      setForm({
+        title: "",
+        description: "",
+      });
+
+      await onSuccess();
+
+      showToast(
+        isEditing
+          ? "Story chapter updated successfully."
+          : "Story chapter added successfully.",
+        "success",
+      );
+    } catch (error) {
+      showToast(error.message || "Failed to save story chapter.", "error");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} style={adminPanelStyle}>
+      <div style={adminTopBadgeStyle}>Story Editor</div>
+
+      <h3 style={adminPanelTitleStyle}>
+        {editingChapter ? "Edit Story Chapter" : "Add Story Chapter"}
+      </h3>
+
+      <p style={adminPanelSubtitleStyle}>
+        Write love notes, milestones, and relationship chapters that belong on
+        the Our Story page.
+      </p>
+
+      <div style={{ display: "grid", gap: "16px", marginTop: "22px" }}>
+        <div>
+          <label style={adminFieldLabelStyle}>Chapter title</label>
+          <input
+            name="title"
+            value={form.title}
+            onChange={handleChange}
+            placeholder="Example: The day we made it official"
+            required
+            style={adminInputStyle}
+          />
+        </div>
+
+        <div>
+          <label style={adminFieldLabelStyle}>Story text</label>
+          <textarea
+            name="description"
+            value={form.description}
+            onChange={handleChange}
+            placeholder="Write the memory, milestone, or chapter here..."
+            rows={6}
+            required
+            style={{
+              ...adminTextareaStyle,
+              minHeight: "170px",
+            }}
+          />
+        </div>
+
+        <AdminFormActions
+          isEditing={Boolean(editingChapter)}
+          isLoading={loading}
+          createText="Save Story"
+          createLoadingText="Saving..."
+          editText="Save Changes"
+          editLoadingText="Saving..."
+          onCancel={onCancelEdit}
+          buttonStyle={primaryButtonStyle}
+          ghostButtonStyle={ghostButtonStyle}
+        />
+      </div>
+    </form>
+  );
+}
+
+export default function StoryPage({ musicCard, showAdmin = false }) {
+  const [storyMemories, setStoryMemories] = useState([]);
+  const [loadingStories, setLoadingStories] = useState(true);
+  const [editingChapter, setEditingChapter] = useState(null);
+
+  const windowWidth = useWindowWidth();
+  const {
+    toast,
+    showToast,
+    hideToast,
+    confirmState,
+    openConfirm,
+    closeConfirm,
+  } = useFeedbackUI();
+
+  async function fetchStoryMemories() {
+    try {
+      setLoadingStories(true);
+
+      const params = new URLSearchParams();
+      params.set("page", "1");
+      params.set("limit", "50");
+      params.set("type", "story");
+
+      const response = await fetch(
+        `${API_BASE}/api/memories?${params.toString()}`,
+      );
+
+      let result = null;
+      try {
+        result = await response.json();
+      } catch {
+        result = null;
+      }
+
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.message || "Failed to fetch story memories.");
+      }
+
+      const items = Array.isArray(result?.data?.items) ? result.data.items : [];
+      setStoryMemories(items);
+    } catch (error) {
+      setStoryMemories([]);
+      showToast(error.message || "Failed to load story memories.", "error");
+    } finally {
+      setLoadingStories(false);
+    }
+  }
+
+  useEffect(() => {
+    fetchStoryMemories();
+  }, []);
 
   const timelineItems = useMemo(
     () => sortByDateAscending(fallbackLoveStoryTimeline),
@@ -418,18 +611,71 @@ export default function StoryPage({ musicCard }) {
   );
 
   const hasSideMusicColumn = Boolean(musicCard) && windowWidth >= 1700;
+  const hasAdminSidebar = showAdmin && windowWidth >= 1180;
 
-  const layoutStyle = hasSideMusicColumn
-    ? {
-        display: "grid",
-        gridTemplateColumns: "minmax(0, 1fr) 320px",
-        gap: "28px",
-        alignItems: "start",
+  let layoutStyle = {
+    display: "grid",
+    gap: "28px",
+    alignItems: "start",
+  };
+
+  if (hasAdminSidebar && hasSideMusicColumn) {
+    layoutStyle.gridTemplateColumns = "320px minmax(0, 1fr) 320px";
+  } else if (hasAdminSidebar) {
+    layoutStyle.gridTemplateColumns = "320px minmax(0, 1fr)";
+  } else if (hasSideMusicColumn) {
+    layoutStyle.gridTemplateColumns = "minmax(0, 1fr) 320px";
+  }
+
+  async function handleChapterSaved() {
+    setEditingChapter(null);
+    await fetchStoryMemories();
+  }
+
+  function handleEditChapter(chapter) {
+    setEditingChapter(chapter);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  async function deleteStoryChapter(id) {
+    try {
+      const response = await fetch(`${API_BASE}/api/memories/${id}`, {
+        method: "DELETE",
+        headers: getAdminHeaders(),
+      });
+
+      let result = null;
+      try {
+        result = await response.json();
+      } catch {
+        result = null;
       }
-    : {
-        display: "grid",
-        gap: "28px",
-      };
+
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.message || "Failed to delete story chapter.");
+      }
+
+      if (editingChapter?.id === id) {
+        setEditingChapter(null);
+      }
+
+      await fetchStoryMemories();
+      showToast("Story chapter deleted successfully.", "success");
+    } catch (error) {
+      showToast(error.message || "Failed to delete story chapter.", "error");
+    } finally {
+      closeConfirm();
+    }
+  }
+
+  function askDeleteChapter(id) {
+    openConfirm({
+      title: "Delete this story chapter?",
+      message:
+        "This written chapter will be removed from the Our Story page permanently. This action cannot be undone.",
+      onConfirm: () => deleteStoryChapter(id),
+    });
+  }
 
   return (
     <>
@@ -448,6 +694,24 @@ export default function StoryPage({ musicCard }) {
         />
 
         <div style={layoutStyle}>
+          {showAdmin ? (
+            <div
+              style={
+                hasAdminSidebar
+                  ? { position: "sticky", top: "92px" }
+                  : undefined
+              }
+            >
+              <AdminAccessPanel showToast={showToast} />
+              <StoryChapterForm
+                editingChapter={editingChapter}
+                onSuccess={handleChapterSaved}
+                onCancelEdit={() => setEditingChapter(null)}
+                showToast={showToast}
+              />
+            </div>
+          ) : null}
+
           <div style={{ display: "grid", gap: "28px" }}>
             <StoryIntroCard />
 
@@ -570,7 +834,7 @@ export default function StoryPage({ musicCard }) {
                   Loading story chapters...
                 </div>
               ) : storyChapters.length === 0 ? (
-                <EmptyChaptersState />
+                <EmptyChaptersState showAdmin={showAdmin} />
               ) : (
                 <div
                   style={{
@@ -580,7 +844,13 @@ export default function StoryPage({ musicCard }) {
                   }}
                 >
                   {storyChapters.map((chapter) => (
-                    <ChapterCard key={chapter.id} chapter={chapter} />
+                    <ChapterCard
+                      key={chapter.id}
+                      chapter={chapter}
+                      showAdmin={showAdmin}
+                      onEdit={handleEditChapter}
+                      onDelete={askDeleteChapter}
+                    />
                   ))}
                 </div>
               )}
@@ -596,6 +866,17 @@ export default function StoryPage({ musicCard }) {
           <div style={{ marginTop: "28px" }}>{musicCard}</div>
         ) : null}
       </section>
+
+      <ConfirmModal
+        open={confirmState.open}
+        title={confirmState.title}
+        message={confirmState.message}
+        confirmText="Delete"
+        cancelText="Cancel"
+        isDanger={true}
+        onConfirm={confirmState.onConfirm || closeConfirm}
+        onCancel={closeConfirm}
+      />
 
       <Toast
         open={toast.open}
