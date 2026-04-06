@@ -1,36 +1,20 @@
-import { useRef } from "react";
+import { useHiddenAdminTap } from "./HiddenAdminTrigger";
+import useWindowWidth from "../hooks/useWindowWidth";
 
 export default function Navbar({
   currentPage,
   setCurrentPage,
-  onSecretAdminToggle,
+  onSecretAdminOpen,
 }) {
   const links = ["Home", "Our Story", "Gallery", "For Her", "For Me"];
-  const isMobile =
-    typeof window !== "undefined" ? window.innerWidth < 768 : false;
+  const windowWidth = useWindowWidth();
+  const isMobile = windowWidth < 768;
 
-  const tapCountRef = useRef(0);
-  const tapTimerRef = useRef(null);
-
-  function handleLogoTap() {
-    tapCountRef.current += 1;
-
-    if (tapTimerRef.current) {
-      clearTimeout(tapTimerRef.current);
-    }
-
-    if (tapCountRef.current >= 5) {
-      tapCountRef.current = 0;
-      if (onSecretAdminToggle) {
-        onSecretAdminToggle();
-      }
-      return;
-    }
-
-    tapTimerRef.current = setTimeout(() => {
-      tapCountRef.current = 0;
-    }, 2200);
-  }
+  const { onInteract } = useHiddenAdminTap({
+    onTrigger: onSecretAdminOpen,
+    requiredTaps: 5,
+    windowMs: 2000,
+  });
 
   return (
     <nav
@@ -59,14 +43,16 @@ export default function Navbar({
         }}
       >
         <button
+          type="button"
           onClick={() => {
-            handleLogoTap();
+            onInteract();
             setCurrentPage("Home");
           }}
           style={{
             border: "none",
             background: "transparent",
-            padding: 0,
+            padding: "10px 12px",
+            margin: "-10px 0 -10px -12px",
             cursor: "pointer",
             color: "#ffe4ef",
             fontWeight: 900,
@@ -74,6 +60,13 @@ export default function Navbar({
             fontSize: isMobile ? "22px" : "28px",
             lineHeight: 1,
             textShadow: "0 2px 12px rgba(255, 120, 180, 0.12)",
+            minHeight: "44px",
+            minWidth: "44px",
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            WebkitTapHighlightColor: "transparent",
+            touchAction: "manipulation",
           }}
         >
           PINK
@@ -96,6 +89,7 @@ export default function Navbar({
 
             return (
               <button
+                type="button"
                 key={link}
                 onClick={() => setCurrentPage(link)}
                 style={{
@@ -117,6 +111,8 @@ export default function Navbar({
                   transition: "all 0.25s ease",
                   whiteSpace: "nowrap",
                   flexShrink: 0,
+                  touchAction: "manipulation",
+                  WebkitTapHighlightColor: "transparent",
                 }}
               >
                 {link}

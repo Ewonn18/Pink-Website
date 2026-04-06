@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import FloatingHearts from "./components/FloatingHearts";
 import LoadingScreen from "./components/LoadingScreen";
 import Navbar from "./components/Navbar";
@@ -9,6 +9,10 @@ import GalleryPage from "./pages/GalleryPage";
 import ForHerPage from "./pages/ForHerPage";
 import ForMePage from "./pages/ForMePage";
 import { pageMusic } from "./data/siteContent";
+import { getInitialAdminMode, exitAdminMode } from "./utils/adminAuth";
+import AdminUnlockModal from "./components/AdminUnlockModal";
+import AdminModeBadge from "./components/AdminModeBadge";
+import { useHiddenAdminTap } from "./components/HiddenAdminTrigger";
 
 function getInitialVolume() {
   try {
@@ -43,8 +47,29 @@ export default function App() {
   const [volume, setVolume] = useState(getInitialVolume);
   const [isMuted, setIsMuted] = useState(getInitialMuted);
 
+  const [adminMode, setAdminMode] = useState(getInitialAdminMode);
+  const [unlockModalOpen, setUnlockModalOpen] = useState(false);
+
   const audioRef = useRef(null);
   const currentTrack = pageMusic[currentPage];
+
+  const openUnlockModal = useCallback(() => {
+    setUnlockModalOpen(true);
+  }, []);
+
+  const closeUnlockModal = useCallback(() => {
+    setUnlockModalOpen(false);
+  }, []);
+
+  const handleAdminUnlocked = useCallback(() => {
+    setAdminMode(true);
+  }, []);
+
+  const { onInteract: onFooterSecretInteract } = useHiddenAdminTap({
+    onTrigger: openUnlockModal,
+    requiredTaps: 5,
+    windowMs: 2000,
+  });
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -141,6 +166,11 @@ export default function App() {
     });
   }
 
+  function handleExitAdmin() {
+    exitAdminMode();
+    setAdminMode(false);
+  }
+
   const sharedMusicCard = (
     <PageMusicCard
       currentPage={currentPage}
@@ -162,9 +192,13 @@ export default function App() {
   );
 
   if (currentPage === "Our Story") {
-    pageContent = <StoryPage musicCard={sharedMusicCard} />;
+    pageContent = (
+      <StoryPage musicCard={sharedMusicCard} showAdmin={adminMode} />
+    );
   } else if (currentPage === "Gallery") {
-    pageContent = <GalleryPage musicCard={sharedMusicCard} />;
+    pageContent = (
+      <GalleryPage musicCard={sharedMusicCard} showAdmin={adminMode} />
+    );
   } else if (currentPage === "For Her") {
     pageContent = <ForHerPage musicCard={sharedMusicCard} />;
   } else if (currentPage === "For Me") {
@@ -210,7 +244,11 @@ export default function App() {
         }}
       />
 
-      <Navbar currentPage={currentPage} setCurrentPage={setCurrentPage} />
+      <Navbar
+        currentPage={currentPage}
+        setCurrentPage={setCurrentPage}
+        onSecretAdminOpen={openUnlockModal}
+      />
 
       <main key={currentPage} className="page-transition">
         {pageContent}
@@ -256,17 +294,36 @@ export default function App() {
             made with love
           </div>
 
-          <p
+          <button
+            type="button"
+            onClick={onFooterSecretInteract}
+            aria-label="PINK"
             style={{
-              fontSize: "26px",
-              fontWeight: 900,
-              letterSpacing: "0.20em",
-              color: "#ffe4ef",
-              margin: "16px 0 0",
+              display: "block",
+              margin: "12px auto 0",
+              border: "none",
+              background: "transparent",
+              cursor: "pointer",
+              padding: "12px 16px",
+              fontFamily: "inherit",
+              minHeight: "44px",
+              minWidth: "44px",
+              WebkitTapHighlightColor: "transparent",
+              touchAction: "manipulation",
             }}
           >
-            PINK
-          </p>
+            <span
+              style={{
+                fontSize: "26px",
+                fontWeight: 900,
+                letterSpacing: "0.20em",
+                color: "#ffe4ef",
+                pointerEvents: "none",
+              }}
+            >
+              PINK
+            </span>
+          </button>
 
           <p
             style={{
@@ -299,6 +356,14 @@ export default function App() {
           </div>
         </div>
       </footer>
+
+      <AdminUnlockModal
+        open={unlockModalOpen}
+        onClose={closeUnlockModal}
+        onUnlocked={handleAdminUnlocked}
+      />
+
+      {adminMode ? <AdminModeBadge onExitAdmin={handleExitAdmin} /> : null}
     </div>
   );
 }

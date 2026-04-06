@@ -51,6 +51,7 @@ app.use(
       }
     },
     credentials: false,
+    allowedHeaders: ["Content-Type", "x-admin-passcode"],
   }),
 );
 
@@ -108,6 +109,13 @@ app.get("/api/dashboard/latest", (_req, res) => {
     data: {
       items: sorted.slice(0, 1),
     },
+  });
+});
+
+app.get("/api/admin/verify", requireAdmin, (_req, res) => {
+  return res.json({
+    success: true,
+    message: "Admin passcode accepted.",
   });
 });
 

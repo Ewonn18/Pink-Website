@@ -43,6 +43,24 @@ async function parseJsonSafely(response) {
   }
 }
 
+export async function verifyAdminPasscode(passcode) {
+  const trimmed = String(passcode || "").trim();
+  if (!trimmed) return false;
+
+  try {
+    const response = await fetch(buildUrl("/api/admin/verify"), {
+      headers: {
+        "x-admin-passcode": trimmed,
+      },
+    });
+
+    const result = await parseJsonSafely(response);
+    return response.ok && result?.success === true;
+  } catch {
+    return false;
+  }
+}
+
 export async function apiRequest(path, options = {}) {
   const { method = "GET", headers = {}, body, useAdmin = false } = options;
 
